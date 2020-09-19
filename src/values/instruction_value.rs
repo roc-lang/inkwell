@@ -29,6 +29,8 @@ pub enum InstructionOpcode {
     BitCast,
     Br,
     Call,
+    #[llvm_versions(9.0..=latest)]
+    CallBr,
     #[llvm_versions(3.8..=latest)]
     CatchPad,
     #[llvm_versions(3.8..=latest)]
@@ -52,6 +54,8 @@ pub enum InstructionOpcode {
     FPToSI,
     FPToUI,
     FPTrunc,
+    #[llvm_versions(10.0..=latest)]
+    Freeze,
     FRem,
     FSub,
     GetElementPtr,
@@ -182,11 +186,14 @@ impl<'ctx> InstructionValue<'ctx> {
         BasicBlock::new(value)
     }
 
-    // REVIEW: See if necessary to check opcode == Call first.
-    // Does it always return false otherwise?
     pub fn is_tail_call(&self) -> bool {
-        unsafe {
-            LLVMIsTailCall(self.as_value_ref()) == 1
+        // LLVMIsTailCall has UB if the value is not an llvm::CallInst*.
+        if self.get_opcode() == InstructionOpcode::Call {
+            unsafe {
+                LLVMIsTailCall(self.as_value_ref()) == 1
+            }
+        } else {
+            false
         }
     }
 
