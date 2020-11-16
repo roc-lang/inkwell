@@ -4,6 +4,8 @@ use llvm_sys::core::{LLVMGetAlignment, LLVMSetAlignment, LLVMGetInstructionOpcod
 use llvm_sys::core::{LLVMGetOrdering, LLVMSetOrdering};
 #[llvm_versions(3.9..=latest)]
 use llvm_sys::core::LLVMInstructionRemoveFromParent;
+#[llvm_versions(10.0..=latest)]
+use llvm_sys::core::{LLVMIsAAtomicRMWInst, LLVMIsAAtomicCmpXchgInst};
 use llvm_sys::LLVMOpcode;
 use llvm_sys::prelude::LLVMValueRef;
 
@@ -104,14 +106,22 @@ pub struct InstructionValue<'ctx> {
 }
 
 impl<'ctx> InstructionValue<'ctx> {
-    fn is_a_load_inst(&self) -> bool {
+    fn is_a_load_inst(self) -> bool {
         !unsafe { LLVMIsALoadInst(self.as_value_ref()) }.is_null()
     }
-    fn is_a_store_inst(&self) -> bool {
+    fn is_a_store_inst(self) -> bool {
         !unsafe { LLVMIsAStoreInst(self.as_value_ref()) }.is_null()
     }
-    fn is_a_alloca_inst(&self) -> bool {
+    fn is_a_alloca_inst(self) -> bool {
         !unsafe { LLVMIsAAllocaInst(self.as_value_ref()) }.is_null()
+    }
+    #[llvm_versions(10.0..=latest)]
+    fn is_a_atomicrmw_inst(self) -> bool {
+        !unsafe { LLVMIsAAtomicRMWInst(self.as_value_ref()) }.is_null()
+    }
+    #[llvm_versions(10.0..=latest)]
+    fn is_a_cmpxchg_inst(self) -> bool {
+        !unsafe { LLVMIsAAtomicCmpXchgInst(self.as_value_ref()) }.is_null()
     }
 
     pub(crate) fn new(instruction_value: LLVMValueRef) -> Self {
@@ -126,7 +136,7 @@ impl<'ctx> InstructionValue<'ctx> {
         }
     }
 
-    pub fn get_opcode(&self) -> InstructionOpcode {
+    pub fn get_opcode(self) -> InstructionOpcode {
         let opcode = unsafe {
             LLVMGetInstructionOpcode(self.as_value_ref())
         };
@@ -134,7 +144,7 @@ impl<'ctx> InstructionValue<'ctx> {
         InstructionOpcode::new(opcode)
     }
 
-    pub fn get_previous_instruction(&self) -> Option<Self> {
+    pub fn get_previous_instruction(self) -> Option<Self> {
         let value = unsafe {
             LLVMGetPreviousInstruction(self.as_value_ref())
         };
@@ -146,7 +156,7 @@ impl<'ctx> InstructionValue<'ctx> {
         Some(InstructionValue::new(value))
     }
 
-    pub fn get_next_instruction(&self) -> Option<Self> {
+    pub fn get_next_instruction(self) -> Option<Self> {
         let value = unsafe {
             LLVMGetNextInstruction(self.as_value_ref())
         };
@@ -159,7 +169,7 @@ impl<'ctx> InstructionValue<'ctx> {
     }
 
     // REVIEW: Potentially unsafe if parent BB or grandparent fn were removed?
-    pub fn erase_from_basic_block(&self) {
+    pub fn erase_from_basic_block(self) {
         unsafe {
             LLVMInstructionEraseFromParent(self.as_value_ref())
         }
@@ -167,7 +177,7 @@ impl<'ctx> InstructionValue<'ctx> {
 
     // REVIEW: Potentially unsafe if parent BB or grandparent fn were removed?
     #[llvm_versions(3.9..=latest)]
-    pub fn remove_from_basic_block(&self) {
+    pub fn remove_from_basic_block(self) {
         unsafe {
             LLVMInstructionRemoveFromParent(self.as_value_ref())
         }
@@ -178,7 +188,7 @@ impl<'ctx> InstructionValue<'ctx> {
     // but I doubt LLVM returns null if the parent BB (or grandparent FN)
     // was deleted... Invalid memory is more likely. Cloned IV will have no
     // parent?
-    pub fn get_parent(&self) -> Option<BasicBlock<'ctx>> {
+    pub fn get_parent(self) -> Option<BasicBlock<'ctx>> {
         let value = unsafe {
             LLVMGetInstructionParent(self.as_value_ref())
         };
@@ -186,7 +196,7 @@ impl<'ctx> InstructionValue<'ctx> {
         BasicBlock::new(value)
     }
 
-    pub fn is_tail_call(&self) -> bool {
+    pub fn is_tail_call(self) -> bool {
         // LLVMIsTailCall has UB if the value is not an llvm::CallInst*.
         if self.get_opcode() == InstructionOpcode::Call {
             unsafe {
@@ -197,15 +207,16 @@ impl<'ctx> InstructionValue<'ctx> {
         }
     }
 
-    pub fn replace_all_uses_with(&self, other: &InstructionValue<'ctx>) {
+    pub fn replace_all_uses_with(self, other: &InstructionValue<'ctx>) {
         self.instruction_value.replace_all_uses_with(other.as_value_ref())
     }
 
     // SubTypes: Only apply to memory access instructions
     /// Returns whether or not a memory access instruction is volatile.
-    pub fn get_volatile(&self) -> Result<bool, &'static str> {
+    #[llvm_versions(3.6..=9.0)]
+    pub fn get_volatile(self) -> Result<bool, &'static str> {
         // Although cmpxchg and atomicrmw can have volatile, LLVM's C API
-        // does not export that functionality.
+        // does not export that functionality until 10.0.
         if !self.is_a_load_inst() && !self.is_a_store_inst() {
             return Err("Value is not a load or store.");
         }
@@ -213,19 +224,42 @@ impl<'ctx> InstructionValue<'ctx> {
     }
 
     // SubTypes: Only apply to memory access instructions
+    /// Returns whether or not a memory access instruction is volatile.
+    #[llvm_versions(10.0..=latest)]
+    pub fn get_volatile(self) -> Result<bool, &'static str> {
+        if !self.is_a_load_inst() && !self.is_a_store_inst() &&
+           !self.is_a_atomicrmw_inst() && !self.is_a_cmpxchg_inst() {
+            return Err("Value is not a load, store, atomicrmw or cmpxchg.");
+        }
+        Ok(unsafe { LLVMGetVolatile(self.as_value_ref()) } == 1)
+    }
+
+    // SubTypes: Only apply to memory access instructions
     /// Sets whether or not a memory access instruction is volatile.
-    pub fn set_volatile(&self, volatile: bool) -> Result<(), &'static str> {
+    #[llvm_versions(3.6..=9.0)]
+    pub fn set_volatile(self, volatile: bool) -> Result<(), &'static str> {
         // Although cmpxchg and atomicrmw can have volatile, LLVM's C API
-        // does not export that functionality.
+        // does not export that functionality until 10.0.
         if !self.is_a_load_inst() && !self.is_a_store_inst() {
             return Err("Value is not a load or store.");
+        }
+        Ok(unsafe { LLVMSetVolatile(self.as_value_ref(), volatile as i32) })
+    }
+    
+    // SubTypes: Only apply to memory access instructions
+    /// Sets whether or not a memory access instruction is volatile.
+    #[llvm_versions(10.0..=latest)]
+    pub fn set_volatile(self, volatile: bool) -> Result<(), &'static str> {
+        if !self.is_a_load_inst() && !self.is_a_store_inst() &&
+           !self.is_a_atomicrmw_inst() && !self.is_a_cmpxchg_inst() {
+            return Err("Value is not a load, store, atomicrmw or cmpxchg.");
         }
         Ok(unsafe { LLVMSetVolatile(self.as_value_ref(), volatile as i32) })
     }
 
     // SubTypes: Only apply to memory access and alloca instructions
     /// Returns alignment on a memory access instruction or alloca.
-    pub fn get_alignment(&self) -> Result<u32, &'static str> {
+    pub fn get_alignment(self) -> Result<u32, &'static str> {
         if !self.is_a_alloca_inst() && !self.is_a_load_inst() && !self.is_a_store_inst() {
             return Err("Value is not an alloca, load or store.");
         }
@@ -234,7 +268,7 @@ impl<'ctx> InstructionValue<'ctx> {
 
     // SubTypes: Only apply to memory access and alloca instructions
     /// Sets alignment on a memory access instruction or alloca.
-    pub fn set_alignment(&self, alignment: u32) -> Result<(), &'static str> {
+    pub fn set_alignment(self, alignment: u32) -> Result<(), &'static str> {
         if !alignment.is_power_of_two() && alignment != 0 {
             return Err("Alignment is not a power of 2!");
         }
@@ -247,7 +281,7 @@ impl<'ctx> InstructionValue<'ctx> {
     // SubTypes: Only apply to memory access instructions
     /// Returns atomic ordering on a memory access instruction.
     #[llvm_versions(3.8..=latest)]
-    pub fn get_atomic_ordering(&self) -> Result<AtomicOrdering, &'static str> {
+    pub fn get_atomic_ordering(self) -> Result<AtomicOrdering, &'static str> {
         if !self.is_a_load_inst() && !self.is_a_store_inst() {
             return Err("Value is not a load or store.");
         }
@@ -257,7 +291,7 @@ impl<'ctx> InstructionValue<'ctx> {
     // SubTypes: Only apply to memory access instructions
     /// Sets atomic ordering on a memory access instruction.
     #[llvm_versions(3.8..=latest)]
-    pub fn set_atomic_ordering(&self, ordering: AtomicOrdering) -> Result<(), &'static str> {
+    pub fn set_atomic_ordering(self, ordering: AtomicOrdering) -> Result<(), &'static str> {
         // Although fence and atomicrmw both have an ordering, the LLVM C API
         // does not support them. The cmpxchg instruction has two orderings and
         // does not work with this API.
@@ -332,7 +366,7 @@ impl<'ctx> InstructionValue<'ctx> {
     /// 3) Function call has two: i8 pointer %1 argument, and the free function itself
     /// 4) Void return has zero: void is not a value and does not count as an operand
     /// even though the return instruction can take values.
-    pub fn get_num_operands(&self) -> u32 {
+    pub fn get_num_operands(self) -> u32 {
         unsafe {
             LLVMGetNumOperands(self.as_value_ref()) as u32
         }
@@ -399,7 +433,7 @@ impl<'ctx> InstructionValue<'ctx> {
     /// 3) Function call has two: i8 pointer %1 argument, and the free function itself
     /// 4) Void return has zero: void is not a value and does not count as an operand
     /// even though the return instruction can take values.
-    pub fn get_operand(&self, index: u32) -> Option<Either<BasicValueEnum<'ctx>, BasicBlock<'ctx>>> {
+    pub fn get_operand(self, index: u32) -> Option<Either<BasicValueEnum<'ctx>, BasicBlock<'ctx>>> {
         let num_operands = self.get_num_operands();
 
         if index >= num_operands {
@@ -460,7 +494,7 @@ impl<'ctx> InstructionValue<'ctx> {
     ///
     /// assert_eq!(free_instruction.get_operand(0).unwrap().left().unwrap(), f32_val);
     /// ```
-    pub fn set_operand<BV: BasicValue<'ctx>>(&self, index: u32, val: BV) -> bool {
+    pub fn set_operand<BV: BasicValue<'ctx>>(self, index: u32, val: BV) -> bool {
         let num_operands = self.get_num_operands();
 
         if index >= num_operands {
@@ -502,7 +536,7 @@ impl<'ctx> InstructionValue<'ctx> {
     ///
     /// assert_eq!(store_instruction.get_operand_use(1), arg1.get_first_use());
     /// ```
-    pub fn get_operand_use(&self, index: u32) -> Option<BasicValueUse> {
+    pub fn get_operand_use(self, index: u32) -> Option<BasicValueUse<'ctx>> {
         let num_operands = self.get_num_operands();
 
         if index >= num_operands {
@@ -550,7 +584,7 @@ impl<'ctx> InstructionValue<'ctx> {
     ///
     /// assert!(arg1.get_first_use().is_some());
     /// ```
-    pub fn get_first_use(&self) -> Option<BasicValueUse> {
+    pub fn get_first_use(self) -> Option<BasicValueUse<'ctx>> {
         self.instruction_value.get_first_use()
     }
 
@@ -560,7 +594,7 @@ impl<'ctx> InstructionValue<'ctx> {
     /// this gives the `slt`.
     ///
     /// If the instruction is not an `ICmp`, this returns None.
-    pub fn get_icmp_predicate(&self) -> Option<IntPredicate> {
+    pub fn get_icmp_predicate(self) -> Option<IntPredicate> {
         // REVIEW: this call to get_opcode() can be inefficient;
         // what happens if we don't perform this check, and just call
         // LLVMGetICmpPredicate() regardless?
@@ -580,7 +614,7 @@ impl<'ctx> InstructionValue<'ctx> {
     /// this gives the `olt`.
     ///
     /// If the instruction is not an `FCmp`, this returns None.
-    pub fn get_fcmp_predicate(&self) -> Option<FloatPredicate> {
+    pub fn get_fcmp_predicate(self) -> Option<FloatPredicate> {
         // REVIEW: this call to get_opcode() can be inefficient;
         // what happens if we don't perform this check, and just call
         // LLVMGetFCmpPredicate() regardless?
@@ -595,7 +629,7 @@ impl<'ctx> InstructionValue<'ctx> {
     }
 
     /// Determines whether or not this `Instruction` has any associated metadata.
-    pub fn has_metadata(&self) -> bool {
+    pub fn has_metadata(self) -> bool {
         unsafe {
             LLVMHasMetadata(self.instruction_value.value) == 1
         }
@@ -603,7 +637,7 @@ impl<'ctx> InstructionValue<'ctx> {
 
     /// Gets the `MetadataValue` associated with this `Instruction` at a specific
     /// `kind_id`.
-    pub fn get_metadata(&self, kind_id: u32) -> Option<MetadataValue<'ctx>> {
+    pub fn get_metadata(self, kind_id: u32) -> Option<MetadataValue<'ctx>> {
         let metadata_value = unsafe {
             LLVMGetMetadata(self.instruction_value.value, kind_id)
         };
@@ -617,7 +651,7 @@ impl<'ctx> InstructionValue<'ctx> {
 
     /// Determines whether or not this `Instruction` has any associated metadata
     /// `kind_id`.
-    pub fn set_metadata(&self, metadata: MetadataValue<'ctx>, kind_id: u32) {
+    pub fn set_metadata(self, metadata: MetadataValue<'ctx>, kind_id: u32) {
         unsafe {
             LLVMSetMetadata(self.instruction_value.value, kind_id, metadata.as_value_ref())
         }

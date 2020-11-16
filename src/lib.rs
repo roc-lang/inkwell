@@ -9,6 +9,7 @@
 //! * Most functions which take a string slice as input may possibly panic in the unlikely event that a c style string cannot be created based on it. (IE if your slice already has a null byte in it)
 
 #![deny(missing_debug_implementations)]
+#![cfg_attr(feature = "nightly", feature(doc_cfg))]
 
 #[macro_use]
 extern crate inkwell_internals;
@@ -27,6 +28,8 @@ pub mod builder;
 #[deny(missing_docs)]
 pub mod context;
 pub mod data_layout;
+#[cfg(not(any(feature = "llvm3-6", feature = "llvm3-7", feature = "llvm3-8", feature = "llvm3-9", feature = "llvm4-0", feature = "llvm5-0", feature = "llvm6-0")))]
+pub mod debug_info;
 pub mod execution_engine;
 pub mod memory_buffer;
 #[deny(missing_docs)]
@@ -37,7 +40,34 @@ pub mod targets;
 pub mod types;
 pub mod values;
 
+// Boilerplate to select a desired llvm_sys version at compile & link time.
+#[cfg(feature="llvm3-6")]
+extern crate llvm_sys_36 as llvm_sys;
+#[cfg(feature="llvm3-7")]
+extern crate llvm_sys_37 as llvm_sys;
+#[cfg(feature="llvm3-8")]
+extern crate llvm_sys_38 as llvm_sys;
+#[cfg(feature="llvm3-9")]
+extern crate llvm_sys_39 as llvm_sys;
+#[cfg(feature="llvm4-0")]
+extern crate llvm_sys_40 as llvm_sys;
+#[cfg(feature="llvm5-0")]
+extern crate llvm_sys_50 as llvm_sys;
+#[cfg(feature="llvm6-0")]
+extern crate llvm_sys_60 as llvm_sys;
+#[cfg(feature="llvm7-0")]
+extern crate llvm_sys_70 as llvm_sys;
+#[cfg(feature="llvm8-0")]
+extern crate llvm_sys_80 as llvm_sys;
+#[cfg(feature="llvm9-0")]
+extern crate llvm_sys_90 as llvm_sys;
+#[cfg(feature="llvm10-0")]
+extern crate llvm_sys_100 as llvm_sys;
+
 use llvm_sys::{LLVMIntPredicate, LLVMRealPredicate, LLVMVisibility, LLVMThreadLocalMode, LLVMDLLStorageClass, LLVMAtomicOrdering, LLVMAtomicRMWBinOp};
+
+#[llvm_versions(7.0..=latest)]
+use llvm_sys::LLVMInlineAsmDialect;
 
 use std::convert::TryFrom;
 
@@ -103,7 +133,7 @@ impl TryFrom<u32> for AddressSpace {
 // REVIEW: Maybe this belongs in some sort of prelude?
 /// This enum defines how to compare a `left` and `right` `IntValue`.
 #[llvm_enum(LLVMIntPredicate)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum IntPredicate {
     /// Equal
     #[llvm_variant(LLVMIntEQ)]
@@ -308,7 +338,7 @@ pub enum OptimizationLevel {
     None       = 0,
     Less       = 1,
     Default    = 2,
-    Aggressive = 3
+    Aggressive = 3,
 }
 
 impl Default for OptimizationLevel {
@@ -318,12 +348,15 @@ impl Default for OptimizationLevel {
     }
 }
 
-enum_rename!{
-    GlobalVisibility <=> LLVMVisibility {
-        Default <=> LLVMDefaultVisibility,
-        Hidden <=> LLVMHiddenVisibility,
-        Protected <=> LLVMProtectedVisibility,
-    }
+#[llvm_enum(LLVMVisibility)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum GlobalVisibility {
+    #[llvm_variant(LLVMDefaultVisibility)]
+    Default,
+    #[llvm_variant(LLVMHiddenVisibility)]
+    Hidden,
+    #[llvm_variant(LLVMProtectedVisibility)]
+    Protected,
 }
 
 impl Default for GlobalVisibility {
@@ -352,8 +385,8 @@ impl ThreadLocalMode {
         }
     }
 
-    pub(crate) fn as_llvm_mode(&self) -> LLVMThreadLocalMode {
-        match *self {
+    pub(crate) fn as_llvm_mode(self) -> LLVMThreadLocalMode {
+        match self {
             ThreadLocalMode::GeneralDynamicTLSModel => LLVMThreadLocalMode::LLVMGeneralDynamicTLSModel,
             ThreadLocalMode::LocalDynamicTLSModel => LLVMThreadLocalMode::LLVMLocalDynamicTLSModel,
             ThreadLocalMode::InitialExecTLSModel => LLVMThreadLocalMode::LLVMInitialExecTLSModel,
@@ -363,12 +396,15 @@ impl ThreadLocalMode {
     }
 }
 
-enum_rename! {
-    DLLStorageClass <=> LLVMDLLStorageClass {
-        Default <=> LLVMDefaultStorageClass,
-        Import <=> LLVMDLLImportStorageClass,
-        Export <=> LLVMDLLExportStorageClass,
-    }
+#[llvm_enum(LLVMDLLStorageClass)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum DLLStorageClass {
+    #[llvm_variant(LLVMDefaultStorageClass)]
+    Default,
+    #[llvm_variant(LLVMDLLImportStorageClass)]
+    Import,
+    #[llvm_variant(LLVMDLLExportStorageClass)]
+    Export,
 }
 
 impl Default for DLLStorageClass {
@@ -376,4 +412,14 @@ impl Default for DLLStorageClass {
     fn default() -> Self {
         DLLStorageClass::Default
     }
+}
+
+#[llvm_versions(7.0..=latest)]
+#[llvm_enum(LLVMInlineAsmDialect)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum InlineAsmDialect {
+    #[llvm_variant(LLVMInlineAsmDialectATT)]
+    ATT,
+    #[llvm_variant(LLVMInlineAsmDialectIntel)]
+    Intel,
 }

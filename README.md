@@ -5,7 +5,7 @@
 [![codecov](https://codecov.io/gh/TheDan64/inkwell/branch/master/graph/badge.svg)](https://codecov.io/gh/TheDan64/inkwell)
 [![lines of code](https://tokei.rs/b1/github/TheDan64/inkwell)](https://github.com/Aaronepower/tokei)
 [![Join the chat at https://gitter.im/inkwell-rs/Lobby](https://badges.gitter.im/inkwell-rs/Lobby.svg)](https://gitter.im/inkwell-rs/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
-![Minimum rustc 1.36](https://img.shields.io/badge/rustc-1.36+-brightgreen.svg)
+![Minimum rustc 1.39](https://img.shields.io/badge/rustc-1.39+-brightgreen.svg)
 
 **I**t's a **N**ew **K**ind of **W**rapper for **E**xposing **LL**VM (*S*afely)
 
@@ -13,22 +13,23 @@ Inkwell aims to help you pen your own programming languages by safely wrapping l
 
 ## Requirements
 
-* Rust 1.36+
+* Rust 1.39+
 * Rust Stable, Beta, or Nightly
-* LLVM 3.6, 3.7, 3.8, 3.9, 4.0, 5.0, 6.0, 7.0, or 8.0
+* LLVM 3.6, 3.7, 3.8, 3.9, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, or 10.0
 
 ## Usage
 
-You'll need to point your Cargo.toml to a branch corresponding to a supported LLVM version:
+You'll need to point your Cargo.toml to an existing preview crate on crates.io or the master
+branch with a corresponding LLVM feature flag:
 
 ```toml
 [dependencies]
-inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "llvm3-7" }
+inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm10-0"] }
 ```
 
 Supported versions:
 
-| LLVM Version | GitHub Branch |
+| LLVM Version | Cargo Feature Flag |
 | :----------: | :-----------: |
 | 3.6.x        | llvm3-6       |
 | 3.7.x        | llvm3-7       |
@@ -39,6 +40,11 @@ Supported versions:
 | 6.0.x        | llvm6-0       |
 | 7.0.x        | llvm7-0       |
 | 8.0.x        | llvm8-0       |
+| 9.0.x        | llvm9-0       |
+| 10.0.x       | llvm10-0      |
+
+Please be aware that we may make breaking changes on master from time to time since we are
+pre-v1.0.0, in compliance with semver. Please prefer a crates.io release whenever possible!
 
 ## Documentation
 

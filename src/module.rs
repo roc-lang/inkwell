@@ -10,14 +10,13 @@ use llvm_sys::core::{LLVMGetModuleIdentifier, LLVMSetModuleIdentifier};
 #[llvm_versions(7.0..=latest)]
 use llvm_sys::core::{LLVMGetModuleFlag, LLVMAddModuleFlag};
 use llvm_sys::execution_engine::{LLVMCreateInterpreterForModule, LLVMCreateJITCompilerForModule, LLVMCreateExecutionEngineForModule};
-use llvm_sys::prelude::{LLVMValueRef, LLVMModuleRef};
+use llvm_sys::prelude::{LLVMModuleRef, LLVMValueRef};
 use llvm_sys::LLVMLinkage;
 #[llvm_versions(7.0..=latest)]
 use llvm_sys::LLVMModuleFlagBehavior;
 
 use std::cell::{Cell, RefCell, Ref};
 use std::ffi::CStr;
-use std::ffi::CString;
 use std::fs::File;
 use std::marker::PhantomData;
 use std::mem::{forget, MaybeUninit};
@@ -31,121 +30,138 @@ use crate::{AddressSpace, OptimizationLevel};
 use crate::comdat::Comdat;
 use crate::context::{Context, ContextRef};
 use crate::data_layout::DataLayout;
+#[llvm_versions(7.0..=latest)]
+use crate::debug_info::{DebugInfoBuilder, DICompileUnit, DWARFEmissionKind, DWARFSourceLanguage};
 use crate::execution_engine::ExecutionEngine;
 use crate::memory_buffer::MemoryBuffer;
-use crate::support::LLVMString;
+use crate::support::{to_c_str, LLVMString};
 use crate::targets::{InitializationConfig, Target, TargetTriple};
-use crate::types::{AsTypeRef, BasicType, FunctionType, BasicTypeEnum};
+use crate::types::{AsTypeRef, BasicType, FunctionType, StructType};
 use crate::values::{AsValueRef, FunctionValue, GlobalValue, MetadataValue};
 #[llvm_versions(7.0..=latest)]
 use crate::values::BasicValue;
 
-enum_rename!{
-    /// This enum defines how to link a global variable or function in a module. The variant documenation is
-    /// mostly taken straight from LLVM's own documentation except for some minor clarification.
-    ///
-    /// It is illegal for a function declaration to have any linkage type other than external or extern_weak.
-    ///
-    /// All Global Variables, Functions and Aliases can have one of the following DLL storage class: `DLLImport`
-    /// & `DLLExport`.
-    // REVIEW: Maybe this should go into it's own module?
-    Linkage <=> LLVMLinkage {
-        /// `Appending` linkage may only be applied to global variables of pointer to array type. When two global
-        /// variables with appending linkage are linked together, the two global arrays are appended together.
-        /// This is the LLVM, typesafe, equivalent of having the system linker append together "sections" with
-        /// identical names when .o files are linked. Unfortunately this doesn't correspond to any feature in .o
-        /// files, so it can only be used for variables like llvm.global_ctors which llvm interprets specially.
-        Appending <=> LLVMAppendingLinkage,
-        /// Globals with `AvailableExternally` linkage are never emitted into the object file corresponding to
-        /// the LLVM module. From the linker's perspective, an `AvailableExternally` global is equivalent to an
-        /// external declaration. They exist to allow inlining and other optimizations to take place given
-        /// knowledge of the definition of the global, which is known to be somewhere outside the module. Globals
-        /// with `AvailableExternally` linkage are allowed to be discarded at will, and allow inlining and other
-        /// optimizations. This linkage type is only allowed on definitions, not declarations.
-        AvailableExternally <=> LLVMAvailableExternallyLinkage,
-        /// `Common` linkage is most similar to "weak" linkage, but they are used for tentative definitions
-        /// in C, such as "int X;" at global scope. Symbols with Common linkage are merged in the same way as
-        /// weak symbols, and they may not be deleted if unreferenced. `Common` symbols may not have an explicit
-        /// section, must have a zero initializer, and may not be marked 'constant'. Functions and aliases may
-        /// not have `Common` linkage.
-        Common <=> LLVMCommonLinkage,
-        /// `DLLExport` causes the compiler to provide a global pointer to a pointer in a DLL, so that it can be
-        /// referenced with the dllimport attribute. On Microsoft Windows targets, the pointer name is formed by
-        /// combining __imp_ and the function or variable name. Since this storage class exists for defining a dll
-        /// interface, the compiler, assembler and linker know it is externally referenced and must refrain from
-        /// deleting the symbol.
-        DLLExport <=> LLVMDLLExportLinkage,
-        /// `DLLImport` causes the compiler to reference a function or variable via a global pointer to a pointer
-        /// that is set up by the DLL exporting the symbol. On Microsoft Windows targets, the pointer name is
-        /// formed by combining __imp_ and the function or variable name.
-        DLLImport <=> LLVMDLLImportLinkage,
-        /// If none of the other identifiers are used, the global is externally visible, meaning that it
-        /// participates in linkage and can be used to resolve external symbol references.
-        External <=> LLVMExternalLinkage,
-        /// The semantics of this linkage follow the ELF object file model: the symbol is weak until linked,
-        /// if not linked, the symbol becomes null instead of being an undefined reference.
-        ExternalWeak <=> LLVMExternalWeakLinkage,
-        /// FIXME: Unknown linkage type
-        Ghost <=> LLVMGhostLinkage,
-        /// Similar to private, but the value shows as a local symbol (STB_LOCAL in the case of ELF) in the object
-        /// file. This corresponds to the notion of the 'static' keyword in C.
-        Internal <=> LLVMInternalLinkage,
-        /// FIXME: Unknown linkage type
-        LinkerPrivate <=> LLVMLinkerPrivateLinkage,
-        /// FIXME: Unknown linkage type
-        LinkerPrivateWeak <=> LLVMLinkerPrivateWeakLinkage,
-        /// Globals with `LinkOnceAny` linkage are merged with other globals of the same name when linkage occurs.
-        /// This can be used to implement some forms of inline functions, templates, or other code which must be
-        /// generated in each translation unit that uses it, but where the body may be overridden with a more
-        /// definitive definition later. Unreferenced `LinkOnceAny` globals are allowed to be discarded. Note that
-        /// `LinkOnceAny` linkage does not actually allow the optimizer to inline the body of this function into
-        /// callers because it doesn’t know if this definition of the function is the definitive definition within
-        /// the program or whether it will be overridden by a stronger definition. To enable inlining and other
-        /// optimizations, use `LinkOnceODR` linkage.
-        LinkOnceAny <=> LLVMLinkOnceAnyLinkage,
-        /// FIXME: Unknown linkage type
-        LinkOnceODRAutoHide <=> LLVMLinkOnceODRAutoHideLinkage,
-        /// Some languages allow differing globals to be merged, such as two functions with different semantics.
-        /// Other languages, such as C++, ensure that only equivalent globals are ever merged (the "one definition
-        /// rule" — "ODR"). Such languages can use the `LinkOnceODR` and `WeakODR` linkage types to indicate that
-        /// the global will only be merged with equivalent globals. These linkage types are otherwise the same
-        /// as their non-odr versions.
-        LinkOnceODR <=> LLVMLinkOnceODRLinkage,
-        /// Global values with `Private` linkage are only directly accessible by objects in the current module.
-        /// In particular, linking code into a module with a private global value may cause the private to be
-        /// renamed as necessary to avoid collisions. Because the symbol is private to the module, all references
-        /// can be updated. This doesn’t show up in any symbol table in the object file.
-        Private <=> LLVMPrivateLinkage,
-        /// `WeakAny` linkage has the same merging semantics as linkonce linkage, except that unreferenced globals
-        /// with weak linkage may not be discarded. This is used for globals that are declared WeakAny in C source code.
-        WeakAny <=> LLVMWeakAnyLinkage,
-        /// Some languages allow differing globals to be merged, such as two functions with different semantics.
-        /// Other languages, such as C++, ensure that only equivalent globals are ever merged (the "one definition
-        /// rule" — "ODR"). Such languages can use the `LinkOnceODR` and `WeakODR` linkage types to indicate that
-        /// the global will only be merged with equivalent globals. These linkage types are otherwise the same
-        /// as their non-odr versions.
-        WeakODR <=> LLVMWeakODRLinkage,
-    }
+#[llvm_enum(LLVMLinkage)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+/// This enum defines how to link a global variable or function in a module. The variant documenation is
+/// mostly taken straight from LLVM's own documentation except for some minor clarification.
+///
+/// It is illegal for a function declaration to have any linkage type other than external or extern_weak.
+///
+/// All Global Variables, Functions and Aliases can have one of the following DLL storage class: `DLLImport`
+/// & `DLLExport`.
+// REVIEW: Maybe this should go into it's own module?
+pub enum Linkage {
+    /// `Appending` linkage may only be applied to global variables of pointer to array type. When two global
+    /// variables with appending linkage are linked together, the two global arrays are appended together.
+    /// This is the LLVM, typesafe, equivalent of having the system linker append together "sections" with
+    /// identical names when .o files are linked. Unfortunately this doesn't correspond to any feature in .o
+    /// files, so it can only be used for variables like llvm.global_ctors which llvm interprets specially.
+    #[llvm_variant(LLVMAppendingLinkage)]
+    Appending,
+    /// Globals with `AvailableExternally` linkage are never emitted into the object file corresponding to
+    /// the LLVM module. From the linker's perspective, an `AvailableExternally` global is equivalent to an
+    /// external declaration. They exist to allow inlining and other optimizations to take place given
+    /// knowledge of the definition of the global, which is known to be somewhere outside the module. Globals
+    /// with `AvailableExternally` linkage are allowed to be discarded at will, and allow inlining and other
+    /// optimizations. This linkage type is only allowed on definitions, not declarations.
+    #[llvm_variant(LLVMAvailableExternallyLinkage)]
+    AvailableExternally,
+    /// `Common` linkage is most similar to "weak" linkage, but they are used for tentative definitions
+    /// in C, such as "int X;" at global scope. Symbols with Common linkage are merged in the same way as
+    /// weak symbols, and they may not be deleted if unreferenced. `Common` symbols may not have an explicit
+    /// section, must have a zero initializer, and may not be marked 'constant'. Functions and aliases may
+    /// not have `Common` linkage.
+    #[llvm_variant(LLVMCommonLinkage)]
+    Common,
+    /// `DLLExport` causes the compiler to provide a global pointer to a pointer in a DLL, so that it can be
+    /// referenced with the dllimport attribute. On Microsoft Windows targets, the pointer name is formed by
+    /// combining __imp_ and the function or variable name. Since this storage class exists for defining a dll
+    /// interface, the compiler, assembler and linker know it is externally referenced and must refrain from
+    /// deleting the symbol.
+    #[llvm_variant(LLVMDLLExportLinkage)]
+    DLLExport,
+    /// `DLLImport` causes the compiler to reference a function or variable via a global pointer to a pointer
+    /// that is set up by the DLL exporting the symbol. On Microsoft Windows targets, the pointer name is
+    /// formed by combining __imp_ and the function or variable name.
+    #[llvm_variant(LLVMDLLImportLinkage)]
+    DLLImport,
+    /// If none of the other identifiers are used, the global is externally visible, meaning that it
+    /// participates in linkage and can be used to resolve external symbol references.
+    #[llvm_variant(LLVMExternalLinkage)]
+    External,
+    /// The semantics of this linkage follow the ELF object file model: the symbol is weak until linked,
+    /// if not linked, the symbol becomes null instead of being an undefined reference.
+    #[llvm_variant(LLVMExternalWeakLinkage)]
+    ExternalWeak,
+    /// FIXME: Unknown linkage type
+    #[llvm_variant(LLVMGhostLinkage)]
+    Ghost,
+    /// Similar to private, but the value shows as a local symbol (STB_LOCAL in the case of ELF) in the object
+    /// file. This corresponds to the notion of the 'static' keyword in C.
+    #[llvm_variant(LLVMInternalLinkage)]
+    Internal,
+    /// FIXME: Unknown linkage type
+    #[llvm_variant(LLVMLinkerPrivateLinkage)]
+    LinkerPrivate,
+    /// FIXME: Unknown linkage type
+    #[llvm_variant(LLVMLinkerPrivateWeakLinkage)]
+    LinkerPrivateWeak,
+    /// Globals with `LinkOnceAny` linkage are merged with other globals of the same name when linkage occurs.
+    /// This can be used to implement some forms of inline functions, templates, or other code which must be
+    /// generated in each translation unit that uses it, but where the body may be overridden with a more
+    /// definitive definition later. Unreferenced `LinkOnceAny` globals are allowed to be discarded. Note that
+    /// `LinkOnceAny` linkage does not actually allow the optimizer to inline the body of this function into
+    /// callers because it doesn’t know if this definition of the function is the definitive definition within
+    /// the program or whether it will be overridden by a stronger definition. To enable inlining and other
+    /// optimizations, use `LinkOnceODR` linkage.
+    #[llvm_variant(LLVMLinkOnceAnyLinkage)]
+    LinkOnceAny,
+    /// FIXME: Unknown linkage type
+    #[llvm_variant(LLVMLinkOnceODRAutoHideLinkage)]
+    LinkOnceODRAutoHide,
+    /// Some languages allow differing globals to be merged, such as two functions with different semantics.
+    /// Other languages, such as C++, ensure that only equivalent globals are ever merged (the "one definition
+    /// rule" — "ODR"). Such languages can use the `LinkOnceODR` and `WeakODR` linkage types to indicate that
+    /// the global will only be merged with equivalent globals. These linkage types are otherwise the same
+    /// as their non-odr versions.
+    #[llvm_variant(LLVMLinkOnceODRLinkage)]
+    LinkOnceODR,
+    /// Global values with `Private` linkage are only directly accessible by objects in the current module.
+    /// In particular, linking code into a module with a private global value may cause the private to be
+    /// renamed as necessary to avoid collisions. Because the symbol is private to the module, all references
+    /// can be updated. This doesn’t show up in any symbol table in the object file.
+    #[llvm_variant(LLVMPrivateLinkage)]
+    Private,
+    /// `WeakAny` linkage has the same merging semantics as linkonce linkage, except that unreferenced globals
+    /// with weak linkage may not be discarded. This is used for globals that are declared WeakAny in C source code.
+    #[llvm_variant(LLVMWeakAnyLinkage)]
+    WeakAny,
+    /// Some languages allow differing globals to be merged, such as two functions with different semantics.
+    /// Other languages, such as C++, ensure that only equivalent globals are ever merged (the "one definition
+    /// rule" — "ODR"). Such languages can use the `LinkOnceODR` and `WeakODR` linkage types to indicate that
+    /// the global will only be merged with equivalent globals. These linkage types are otherwise the same
+    /// as their non-odr versions.
+    #[llvm_variant(LLVMWeakODRLinkage)]
+    WeakODR,
 }
 
 /// Represents a reference to an LLVM `Module`.
 /// The underlying module will be disposed when dropping this object.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Module<'ctx> {
-    pub(crate) non_global_context: Option<&'ctx Context>, // REVIEW: Could we just set context to the global context?
     data_layout: RefCell<Option<DataLayout>>,
     pub(crate) module: Cell<LLVMModuleRef>,
     pub(crate) owned_by_ee: RefCell<Option<ExecutionEngine<'ctx>>>,
-    _marker: PhantomData<&'ctx ()>,
+    _marker: PhantomData<&'ctx Context>,
 }
 
 impl<'ctx> Module<'ctx> {
-    pub(crate) fn new(module: LLVMModuleRef, context: Option<&'ctx Context>) -> Self {
+    pub(crate) fn new(module: LLVMModuleRef) -> Self {
         debug_assert!(!module.is_null());
 
         Module {
             module: Cell::new(module),
-            non_global_context: context,
             owned_by_ee: RefCell::new(None),
             data_layout: RefCell::new(Some(Module::get_borrowed_data_layout(module))),
             _marker: PhantomData,
@@ -174,7 +190,7 @@ impl<'ctx> Module<'ctx> {
     /// assert_eq!(fn_val.get_linkage(), Linkage::External);
     /// ```
     pub fn add_function(&self, name: &str, ty: FunctionType<'ctx>, linkage: Option<Linkage>) -> FunctionValue<'ctx> {
-        let c_string = CString::new(name).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(name);
 
         let value = unsafe {
             LLVMAddFunction(self.module.get(), c_string.as_ptr(), ty.as_type_ref())
@@ -280,7 +296,7 @@ impl<'ctx> Module<'ctx> {
     /// assert_eq!(fn_value, module.get_function("my_fn").unwrap());
     /// ```
     pub fn get_function(&self, name: &str) -> Option<FunctionValue<'ctx>> {
-        let c_string = CString::new(name).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(name);
 
         let value = unsafe {
             LLVMGetNamedFunction(self.module.get(), c_string.as_ptr())
@@ -290,7 +306,7 @@ impl<'ctx> Module<'ctx> {
     }
 
 
-    /// Gets a `BasicTypeEnum` of a named type in a `Module`.
+    /// Gets a named `StructType` from this `Module`'s `Context`.
     ///
     /// # Example
     ///
@@ -300,24 +316,24 @@ impl<'ctx> Module<'ctx> {
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     ///
-    /// assert!(module.get_type("foo").is_none());
+    /// assert!(module.get_struct_type("foo").is_none());
     ///
     /// let opaque = context.opaque_struct_type("foo");
     ///
-    /// assert_eq!(module.get_type("foo").unwrap(), opaque.into());
+    /// assert_eq!(module.get_struct_type("foo").unwrap(), opaque);
     /// ```
-    pub fn get_type(&self, name: &str) -> Option<BasicTypeEnum<'ctx>> {
-        let c_string = CString::new(name).expect("Conversion to CString failed unexpectedly");
+    pub fn get_struct_type(&self, name: &str) -> Option<StructType<'ctx>> {
+        let c_string = to_c_str(name);
 
-        let type_ = unsafe {
+        let struct_type = unsafe {
             LLVMGetTypeByName(self.module.get(), c_string.as_ptr())
         };
 
-        if type_.is_null() {
+        if struct_type.is_null() {
             return None;
         }
 
-        Some(BasicTypeEnum::new(type_))
+        Some(StructType::new(struct_type))
     }
 
     /// Assigns a `TargetTriple` to this `Module`.
@@ -416,9 +432,8 @@ impl<'ctx> Module<'ctx> {
             return Err(LLVMString::new(err_string));
         }
 
-        let context = self.non_global_context;
         let execution_engine = unsafe { execution_engine.assume_init() };
-        let execution_engine = ExecutionEngine::new(Rc::new(execution_engine), context, false);
+        let execution_engine = ExecutionEngine::new(Rc::new(execution_engine), false);
 
         *self.owned_by_ee.borrow_mut() = Some(execution_engine.clone());
 
@@ -468,9 +483,8 @@ impl<'ctx> Module<'ctx> {
             return Err(LLVMString::new(err_string));
         }
 
-        let context = self.non_global_context.clone();
         let execution_engine = unsafe { execution_engine.assume_init() };
-        let execution_engine = ExecutionEngine::new(Rc::new(execution_engine), context, false);
+        let execution_engine = ExecutionEngine::new(Rc::new(execution_engine), false);
 
         *self.owned_by_ee.borrow_mut() = Some(execution_engine.clone());
 
@@ -521,9 +535,8 @@ impl<'ctx> Module<'ctx> {
             return Err(LLVMString::new(err_string));
         }
 
-        let context = self.non_global_context.clone();
         let execution_engine = unsafe { execution_engine.assume_init() };
-        let execution_engine = ExecutionEngine::new(Rc::new(execution_engine), context, true);
+        let execution_engine = ExecutionEngine::new(Rc::new(execution_engine), true);
 
         *self.owned_by_ee.borrow_mut() = Some(execution_engine.clone());
 
@@ -547,7 +560,7 @@ impl<'ctx> Module<'ctx> {
     /// assert_eq!(module.get_last_global().unwrap(), global);
     /// ```
     pub fn add_global<T: BasicType<'ctx>>(&self, type_: T, address_space: Option<AddressSpace>, name: &str) -> GlobalValue<'ctx> {
-        let c_string = CString::new(name).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(name);
 
         let value = unsafe {
             match address_space {
@@ -580,7 +593,7 @@ impl<'ctx> Module<'ctx> {
     /// ```
     pub fn write_bitcode_to_path(&self, path: &Path) -> bool {
         let path_str = path.to_str().expect("Did not find a valid Unicode path string");
-        let c_string = CString::new(path_str).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(path_str);
 
         unsafe {
             LLVMWriteBitcodeToFile(self.module.get(), c_string.as_ptr()) == 0
@@ -747,7 +760,7 @@ impl<'ctx> Module<'ctx> {
     /// Prints the content of the `Module` to a file.
     pub fn print_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), LLVMString> {
         let path_str = path.as_ref().to_str().expect("Did not find a valid Unicode path string");
-        let path = CString::new(path_str).expect("Could not convert path to CString");
+        let path = to_c_str(path_str);
         let mut err_string = MaybeUninit::uninit();
         let return_code = unsafe {
             LLVMPrintModuleToFile(self.module.get(), path.as_ptr() as *const ::libc::c_char, err_string.as_mut_ptr())
@@ -768,7 +781,7 @@ impl<'ctx> Module<'ctx> {
         {
             use llvm_sys::core::LLVMSetModuleInlineAsm;
 
-            let c_string = CString::new(asm).expect("Conversion to CString failed unexpectedly");
+            let c_string = to_c_str(asm);
 
             unsafe {
                 LLVMSetModuleInlineAsm(self.module.get(), c_string.as_ptr())
@@ -826,7 +839,7 @@ impl<'ctx> Module<'ctx> {
     /// assert_eq!(md_1[1].into_float_value(), f32_val);
     /// ```
     pub fn add_global_metadata(&self, key: &str, metadata: &MetadataValue<'ctx>) {
-        let c_string = CString::new(key).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(key);
 
         unsafe {
             LLVMAddNamedMetadataOperand(self.module.get(), c_string.as_ptr(), metadata.as_value_ref())
@@ -871,7 +884,7 @@ impl<'ctx> Module<'ctx> {
     /// assert_eq!(md_1[1].into_float_value(), f32_val);
     /// ```
     pub fn get_global_metadata_size(&self, key: &str) -> u32 {
-        let c_string = CString::new(key).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(key);
 
         unsafe {
             LLVMGetNamedMetadataNumOperands(self.module.get(), c_string.as_ptr())
@@ -916,7 +929,7 @@ impl<'ctx> Module<'ctx> {
     /// assert_eq!(md_1[1].into_float_value(), f32_val);
     /// ```
     pub fn get_global_metadata(&self, key: &str) -> Vec<MetadataValue<'ctx>> {
-        let c_string = CString::new(key).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(key);
         let count = self.get_global_metadata_size(key);
 
         let mut raw_vec: Vec<LLVMValueRef> = Vec::with_capacity(count as usize);
@@ -1012,7 +1025,7 @@ impl<'ctx> Module<'ctx> {
     /// assert_eq!(module.get_global("my_global").unwrap(), global);
     /// ```
     pub fn get_global(&self, name: &str) -> Option<GlobalValue<'ctx>> {
-        let c_string = CString::new(name).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(name);
         let value = unsafe {
             LLVMGetNamedGlobal(self.module.get(), c_string.as_ptr())
         };
@@ -1061,7 +1074,7 @@ impl<'ctx> Module<'ctx> {
 
         let module = unsafe { module.assume_init() };
 
-        Ok(Module::new(module, Some(&context)))
+        Ok(Module::new(module))
     }
 
     /// A convenience function for creating a `Module` from a file for a given context.
@@ -1094,12 +1107,11 @@ impl<'ctx> Module<'ctx> {
     ///
     /// ```no_run
     /// use inkwell::context::Context;
-    /// use std::ffi::CString;
     ///
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     ///
-    /// assert_eq!(*module.get_name(), *CString::new("my_mdoule").unwrap());
+    /// assert_eq!(module.get_name().to_str(), Ok("my_mdoule"));
     /// ```
     #[llvm_versions(3.9..=latest)]
     pub fn get_name(&self) -> &CStr {
@@ -1119,14 +1131,13 @@ impl<'ctx> Module<'ctx> {
     ///
     /// ```no_run
     /// use inkwell::context::Context;
-    /// use std::ffi::CString;
     ///
     /// let context = Context::create();
     /// let module = context.create_module("my_module");
     ///
     /// module.set_name("my_module2");
     ///
-    /// assert_eq!(*module.get_name(), *CString::new("my_module2").unwrap());
+    /// assert_eq!(module.get_name().to_str(), Ok("my_module2"));
     /// ```
     #[llvm_versions(3.9..=latest)]
     pub fn set_name(&self, name: &str) {
@@ -1141,17 +1152,16 @@ impl<'ctx> Module<'ctx> {
     ///
     /// ```no_run
     /// use inkwell::context::Context;
-    /// use std::ffi::CString;
     ///
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     ///
-    /// assert_eq!(*module.get_source_file_name(), *CString::new("my_mod").unwrap());
+    /// assert_eq!(module.get_source_file_name().to_str(), Ok("my_mod"));
     ///
     /// module.set_source_file_name("my_mod.rs");
     ///
-    /// assert_eq!(*module.get_name(), *CString::new("my_mod").unwrap());
-    /// assert_eq!(*module.get_source_file_name(), *CString::new("my_mod.rs").unwrap());
+    /// assert_eq!(module.get_name().to_str(), Ok("my_mod"));
+    /// assert_eq!(module.get_source_file_name().to_str(), Ok("my_mod.rs"));
     /// ```
     #[llvm_versions(7.0..=latest)]
     pub fn get_source_file_name(&self) -> &CStr {
@@ -1173,17 +1183,16 @@ impl<'ctx> Module<'ctx> {
     ///
     /// ```no_run
     /// use inkwell::context::Context;
-    /// use std::ffi::CString;
     ///
     /// let context = Context::create();
     /// let module = context.create_module("my_mod");
     ///
-    /// assert_eq!(*module.get_source_file_name(), *CString::new("my_mod").unwrap());
+    /// assert_eq!(module.get_source_file_name().to_str(), Ok("my_mod"));
     ///
     /// module.set_source_file_name("my_mod.rs");
     ///
-    /// assert_eq!(*module.get_name(), *CString::new("my_mod").unwrap());
-    /// assert_eq!(*module.get_source_file_name(), *CString::new("my_mod.rs").unwrap());
+    /// assert_eq!(module.get_name().to_str(), Ok("my_mod"));
+    /// assert_eq!(module.get_source_file_name().to_str(), Ok("my_mod.rs"));
     /// ```
     #[llvm_versions(7.0..=latest)]
     pub fn set_source_file_name(&self, file_name: &str) {
@@ -1269,7 +1278,7 @@ impl<'ctx> Module<'ctx> {
     pub fn get_or_insert_comdat(&self, name: &str) -> Comdat {
         use llvm_sys::comdat::LLVMGetOrInsertComdat;
 
-        let c_string = CString::new(name).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(name);
         let comdat_ptr = unsafe {
             LLVMGetOrInsertComdat(self.module.get(), c_string.as_ptr())
         };
@@ -1293,23 +1302,11 @@ impl<'ctx> Module<'ctx> {
             return None;
         }
 
-        let flag_value = self.with_context(|ctx| unsafe {
-            LLVMMetadataAsValue(ctx.context, flag)
-        });
+        let flag_value = unsafe {
+            LLVMMetadataAsValue(LLVMGetModuleContext(self.module.get()), flag)
+        };
 
         Some(MetadataValue::new(flag_value))
-    }
-
-    fn with_context<F, T>(&self, f: F) -> T
-    where
-        F: FnOnce(&Context) -> T,
-    {
-        match self.non_global_context {
-            Some(ctx) => f(ctx),
-            None => unsafe {
-                Context::get_global(|ctx_lock| f(&*ctx_lock))
-            },
-        }
     }
 
     /// Append a `MetadataValue` as a module wide flag. Note that using the same key twice
@@ -1319,7 +1316,7 @@ impl<'ctx> Module<'ctx> {
         let md = flag.as_metadata_ref();
 
         unsafe {
-            LLVMAddModuleFlag(self.module.get(), behavior.as_llvm_enum(), key.as_ptr() as *mut ::libc::c_char, key.len(), md)
+            LLVMAddModuleFlag(self.module.get(), behavior.into(), key.as_ptr() as *mut ::libc::c_char, key.len(), md)
         }
     }
 
@@ -1335,8 +1332,50 @@ impl<'ctx> Module<'ctx> {
         };
 
         unsafe {
-            LLVMAddModuleFlag(self.module.get(), behavior.as_llvm_enum(), key.as_ptr() as *mut ::libc::c_char, key.len(), md)
+            LLVMAddModuleFlag(self.module.get(), behavior.into(), key.as_ptr() as *mut ::libc::c_char, key.len(), md)
         }
+    }
+
+    /// Strips and debug info from the module, if it exists.
+    #[llvm_versions(6.0..=latest)]
+    pub fn strip_debug_info(&self) -> bool {
+        use llvm_sys::debuginfo::LLVMStripModuleDebugInfo;
+
+        unsafe {
+            LLVMStripModuleDebugInfo(self.module.get()) == 1
+        }
+    }
+
+    /// Gets the version of debug metadata contained in this `Module`.
+    #[llvm_versions(6.0..=latest)]
+    pub fn get_debug_metadata_version(&self) -> libc::c_uint {
+        use llvm_sys::debuginfo::LLVMGetModuleDebugMetadataVersion;
+
+        unsafe {
+            LLVMGetModuleDebugMetadataVersion(self.module.get())
+        }
+    }
+
+    /// Creates a `DebugInfoBuilder` for this `Module`.
+    #[llvm_versions(7.0..=latest)]
+    pub fn create_debug_info_builder(&self,
+        allow_unresolved: bool,
+        language: DWARFSourceLanguage,
+        filename: &str,
+        directory: &str,
+        producer: &str,
+        is_optimized: bool,
+        flags: &str,
+        runtime_ver: libc::c_uint,
+        split_name: &str,
+        kind: DWARFEmissionKind,
+        dwo_id: libc::c_uint,
+        split_debug_inlining: bool,
+        debug_info_for_profiling: bool,
+    ) -> (DebugInfoBuilder<'ctx>, DICompileUnit<'ctx>) {
+        DebugInfoBuilder::new(self, allow_unresolved,
+                              language, filename, directory, producer, is_optimized, flags, runtime_ver, split_name, kind, dwo_id, split_debug_inlining, debug_info_for_profiling
+        )
     }
 }
 
@@ -1351,7 +1390,7 @@ impl Clone for Module<'_> {
             LLVMCloneModule(self.module.get())
         };
 
-        Module::new(module, self.non_global_context)
+        Module::new(module)
     }
 }
 
@@ -1370,29 +1409,35 @@ impl Drop for Module<'_> {
 }
 
 #[llvm_versions(7.0..=latest)]
-enum_rename!{
-    /// Defines the operational behavior for a module wide flag. This documenation comes directly
-    /// from the LLVM docs
-    FlagBehavior <=> LLVMModuleFlagBehavior {
-        /// Emits an error if two values disagree, otherwise the resulting value is that of the operands.
-        Error <=> LLVMModuleFlagBehaviorError,
-        /// Emits a warning if two values disagree. The result value will be the operand for the
-        /// flag from the first module being linked.
-        Warning <=> LLVMModuleFlagBehaviorWarning,
-        /// Adds a requirement that another module flag be present and have a specified value after
-        /// linking is performed. The value must be a metadata pair, where the first element of the
-        /// pair is the ID of the module flag to be restricted, and the second element of the pair
-        /// is the value the module flag should be restricted to. This behavior can be used to
-        /// restrict the allowable results (via triggering of an error) of linking IDs with the
-        /// **Override** behavior.
-        Require <=> LLVMModuleFlagBehaviorRequire,
-        /// Uses the specified value, regardless of the behavior or value of the other module. If
-        /// both modules specify **Override**, but the values differ, an error will be emitted.
-        Override <=> LLVMModuleFlagBehaviorOverride,
-        /// Appends the two values, which are required to be metadata nodes.
-        Append <=> LLVMModuleFlagBehaviorAppend,
-        /// Appends the two values, which are required to be metadata nodes. However, duplicate
-        /// entries in the second list are dropped during the append operation.
-        AppendUnique <=> LLVMModuleFlagBehaviorAppendUnique,
-    }
+#[llvm_enum(LLVMModuleFlagBehavior)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+/// Defines the operational behavior for a module wide flag. This documenation comes directly
+/// from the LLVM docs
+pub enum FlagBehavior {
+    /// Emits an error if two values disagree, otherwise the resulting value is that of the operands.
+    #[llvm_variant(LLVMModuleFlagBehaviorError)]
+    Error,
+    /// Emits a warning if two values disagree. The result value will be the operand for the
+    /// flag from the first module being linked.
+    #[llvm_variant(LLVMModuleFlagBehaviorWarning)]
+    Warning,
+    /// Adds a requirement that another module flag be present and have a specified value after
+    /// linking is performed. The value must be a metadata pair, where the first element of the
+    /// pair is the ID of the module flag to be restricted, and the second element of the pair
+    /// is the value the module flag should be restricted to. This behavior can be used to
+    /// restrict the allowable results (via triggering of an error) of linking IDs with the
+    /// **Override** behavior.
+    #[llvm_variant(LLVMModuleFlagBehaviorRequire)]
+    Require,
+    /// Uses the specified value, regardless of the behavior or value of the other module. If
+    /// both modules specify **Override**, but the values differ, an error will be emitted.
+    #[llvm_variant(LLVMModuleFlagBehaviorOverride)]
+    Override,
+    /// Appends the two values, which are required to be metadata nodes.
+    #[llvm_variant(LLVMModuleFlagBehaviorAppend)]
+    Append,
+    /// Appends the two values, which are required to be metadata nodes. However, duplicate
+    /// entries in the second list are dropped during the append operation.
+    #[llvm_variant(LLVMModuleFlagBehaviorAppendUnique)]
+    AppendUnique,
 }

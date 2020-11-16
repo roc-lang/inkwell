@@ -1,10 +1,7 @@
-extern crate inkwell;
+use inkwell::{AddressSpace, AtomicOrdering, AtomicRMWBinOp, OptimizationLevel};
+use inkwell::context::Context;
+use inkwell::values::BasicValue;
 
-use self::inkwell::{AddressSpace, AtomicOrdering, AtomicRMWBinOp, OptimizationLevel};
-use self::inkwell::context::Context;
-use self::inkwell::values::BasicValue;
-
-// use std::ffi::CString;
 use std::ptr::null;
 
 #[test]
@@ -567,7 +564,7 @@ fn test_vector_binary_ops() {
     let p1_vec = fn_value.get_first_param().unwrap().into_vector_value();
     let p2_vec = fn_value.get_nth_param(1).unwrap().into_vector_value();
     let p3_vec = fn_value.get_nth_param(2).unwrap().into_vector_value();
-    let compared_vec = builder.build_float_compare(self::inkwell::FloatPredicate::OLT, p1_vec, p2_vec, "compared_vec");
+    let compared_vec = builder.build_float_compare(inkwell::FloatPredicate::OLT, p1_vec, p2_vec, "compared_vec");
     let multiplied_vec = builder.build_int_mul(compared_vec, p3_vec, "multiplied_vec");
     builder.build_return(Some(&multiplied_vec));
     assert!(fn_value.verify(true));
@@ -648,27 +645,33 @@ fn test_insert_value() {
     assert!(module.verify().is_ok());
 }
 
+fn is_alignment_ok(align: u32) -> bool {
+    // This replicates the assertions LLVM runs.
+    //
+    // See https://github.com/TheDan64/inkwell/issues/168
+    align > 0 && align.is_power_of_two() && (align as f64).log2() < 64.0
+}
+
 #[llvm_versions(8.0..=latest)]
 #[test]
 fn test_alignment_bytes() {
     let verify_alignment = |alignment: u32| {
         let context = Context::create();
         let module = context.create_module("av");
+        let result = run_memcpy_on(&context, &module, alignment);
 
-        run_memcpy_on(&context, &module, alignment);
-
-        if alignment == 0 || alignment.is_power_of_two() {
-            assert!(module.verify().is_ok(), "alignment of {:?} was neither 0 nor a power of 2, but did not verify for memcpy.", alignment);
+        if is_alignment_ok(alignment) {
+            assert!(result.is_ok() && module.verify().is_ok(), "alignment of {} was a power of 2 under 2^64, but did not verify for memcpy.", alignment);
         } else {
-            assert!(module.verify().is_err(), "alignment of {:?} was neither 0 nor a power of 2, yet verification passed for memcpy when it should not have.", alignment);
+            assert!(result.is_err(), "alignment of {} was a power of 2 under 2^64, yet verification passed for memcpy when it should not have.", alignment);
         }
 
-        run_memmove_on(&context, &module, alignment);
+        let result = run_memmove_on(&context, &module, alignment);
 
-        if alignment == 0 || alignment.is_power_of_two() {
-            assert!(module.verify().is_ok(), "alignment of {:?} was neither 0 nor a power of 2, but did not verify for memmov.", alignment);
+        if is_alignment_ok(alignment) {
+            assert!(result.is_ok() && module.verify().is_ok(), "alignment of {} was a power of 2 under 2^64, but did not verify for memmove.", alignment);
         } else {
-            assert!(module.verify().is_err(), "alignment of {:?} was neither 0 nor a power of 2, yet verification passed for memmov when it should not have.", alignment);
+            assert!(result.is_err(), "alignment of {} was a power of 2 under 2^64, yet verification passed for memmove when it should not have.", alignment);
         }
     };
 
@@ -680,7 +683,7 @@ fn test_alignment_bytes() {
 }
 
 #[llvm_versions(8.0..=latest)]
-fn run_memcpy_on<'ctx>(context: &'ctx Context, module: &self::inkwell::module::Module<'ctx>, alignment: u32) {
+fn run_memcpy_on<'ctx>(context: &'ctx Context, module: &inkwell::module::Module<'ctx>, alignment: u32) -> Result<(), &'static str> {
     let i32_type = context.i32_type();
     let i64_type = context.i64_type();
     let array_len = 4;
@@ -710,9 +713,11 @@ fn run_memcpy_on<'ctx>(context: &'ctx Context, module: &self::inkwell::module::M
     let index_val = i32_type.const_int(2, false);
     let dest_ptr = unsafe { builder.build_in_bounds_gep(array_ptr, &[index_val], "index") };
 
-    builder.build_memcpy(dest_ptr, alignment, array_ptr, alignment, size_val);
+    builder.build_memcpy(dest_ptr, alignment, array_ptr, alignment, size_val)?;
 
     builder.build_return(Some(&array_ptr));
+
+    Ok(())
 }
 
 #[llvm_versions(8.0..=latest)]
@@ -724,7 +729,7 @@ fn test_memcpy() {
     let context = Context::create();
     let module = context.create_module("av");
 
-    run_memcpy_on(&context, &module, 8);
+    assert!(run_memcpy_on(&context, &module, 8).is_ok());
 
     // Verify the module
     if let Err(errors) = module.verify() {
@@ -742,7 +747,7 @@ fn test_memcpy() {
 }
 
 #[llvm_versions(8.0..=latest)]
-fn run_memmove_on<'ctx>(context: &'ctx Context, module: &self::inkwell::module::Module<'ctx>, alignment: u32) {
+fn run_memmove_on<'ctx>(context: &'ctx Context, module: &inkwell::module::Module<'ctx>, alignment: u32) -> Result<(), &'static str> {
     let i32_type = context.i32_type();
     let i64_type = context.i64_type();
     let array_len = 4;
@@ -772,9 +777,11 @@ fn run_memmove_on<'ctx>(context: &'ctx Context, module: &self::inkwell::module::
     let index_val = i32_type.const_int(2, false);
     let dest_ptr = unsafe { builder.build_in_bounds_gep(array_ptr, &[index_val], "index") };
 
-    builder.build_memmove(dest_ptr, alignment, array_ptr, alignment, size_val);
+    builder.build_memmove(dest_ptr, alignment, array_ptr, alignment, size_val)?;
 
     builder.build_return(Some(&array_ptr));
+
+    Ok(())
 }
 
 #[llvm_versions(8.0..=latest)]
@@ -786,7 +793,7 @@ fn test_memmove() {
     let context = Context::create();
     let module = context.create_module("av");
 
-    run_memcpy_on(&context, &module, 8);
+    assert!(run_memcpy_on(&context, &module, 8).is_ok());
 
     // Verify the module
     if let Err(errors) = module.verify() {
@@ -973,4 +980,31 @@ fn test_cmpxchg() {
     let neg_one_value = i32_ptr_type.const_zero();
     let result = builder.build_cmpxchg(ptr_value, zero_value, neg_one_value, AtomicOrdering::Monotonic, AtomicOrdering::Monotonic);
     assert!(result.is_err());
+}
+
+#[test]
+fn test_safe_struct_gep() {
+    let context = Context::create();
+    let builder = context.create_builder();
+    let module = context.create_module("struct_gep");
+    let void_type = context.void_type();
+    let i32_ty = context.i32_type();
+    let i32_ptr_ty = i32_ty.ptr_type(AddressSpace::Generic);
+    let field_types = &[i32_ty.into(), i32_ty.into()];
+    let struct_ty = context.struct_type(field_types, false);
+    let struct_ptr_ty = struct_ty.ptr_type(AddressSpace::Generic);
+    let fn_type = void_type.fn_type(&[i32_ptr_ty.into(), struct_ptr_ty.into()], false);
+    let fn_value = module.add_function("", fn_type, None);
+    let entry = context.append_basic_block(fn_value, "entry");
+
+    builder.position_at_end(entry);
+
+    let i32_ptr = fn_value.get_first_param().unwrap().into_pointer_value();
+    let struct_ptr = fn_value.get_last_param().unwrap().into_pointer_value();
+
+    assert!(builder.build_struct_gep(i32_ptr, 0, "struct_gep").is_err());
+    assert!(builder.build_struct_gep(i32_ptr, 10, "struct_gep").is_err());
+    assert!(builder.build_struct_gep(struct_ptr, 0, "struct_gep").is_ok());
+    assert!(builder.build_struct_gep(struct_ptr, 1, "struct_gep").is_ok());
+    assert!(builder.build_struct_gep(struct_ptr, 2, "struct_gep").is_err());
 }
