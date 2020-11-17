@@ -214,7 +214,7 @@ impl<'ctx> Builder<'ctx> {
             }
         };
 
-        let c_string = CString::new(name).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(name);
         let mut args: Vec<LLVMValueRef> = args.iter().map(|val| val.as_value_ref()).collect();
         let value = unsafe {
             LLVMBuildInvoke(
@@ -239,7 +239,7 @@ impl<'ctx> Builder<'ctx> {
         ptr_ty: PointerType<'ctx>,
         name: &str,
     ) -> BasicValueEnum<'ctx> {
-        let c_string = CString::new(name).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(name);
         let num_clauses = 1 as u32;
 
         let value = unsafe {
