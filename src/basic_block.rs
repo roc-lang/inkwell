@@ -1,12 +1,12 @@
 //! A `BasicBlock` is a container of instructions.
 
-use llvm_sys::core::{LLVMGetBasicBlockParent, LLVMGetBasicBlockTerminator, LLVMGetNextBasicBlock, LLVMIsABasicBlock, LLVMIsConstant, LLVMMoveBasicBlockAfter, LLVMMoveBasicBlockBefore, LLVMPrintTypeToString, LLVMPrintValueToString, LLVMTypeOf, LLVMDeleteBasicBlock, LLVMGetPreviousBasicBlock, LLVMRemoveBasicBlockFromParent, LLVMGetFirstInstruction, LLVMGetLastInstruction, LLVMGetTypeContext, LLVMBasicBlockAsValue, LLVMReplaceAllUsesWith};
+use llvm_sys::core::{LLVMGetBasicBlockParent, LLVMGetBasicBlockTerminator, LLVMGetNextBasicBlock, LLVMIsABasicBlock, LLVMIsConstant, LLVMMoveBasicBlockAfter, LLVMMoveBasicBlockBefore, LLVMPrintTypeToString, LLVMPrintValueToString, LLVMTypeOf, LLVMDeleteBasicBlock, LLVMGetPreviousBasicBlock, LLVMRemoveBasicBlockFromParent, LLVMGetFirstInstruction, LLVMGetLastInstruction, LLVMGetTypeContext, LLVMBasicBlockAsValue, LLVMReplaceAllUsesWith, LLVMGetFirstUse};
 #[llvm_versions(3.9..=latest)]
 use llvm_sys::core::LLVMGetBasicBlockName;
 use llvm_sys::prelude::{LLVMValueRef, LLVMBasicBlockRef};
 
 use crate::context::ContextRef;
-use crate::values::{FunctionValue, InstructionValue};
+use crate::values::{BasicValueUse, FunctionValue, InstructionValue};
 
 use std::fmt;
 use std::ffi::CStr;
@@ -61,7 +61,7 @@ impl<'ctx> BasicBlock<'ctx> {
     ///
     /// assert!(basic_block.get_parent().is_none());
     /// ```
-    pub fn get_parent(&self) -> Option<FunctionValue<'ctx>> {
+    pub fn get_parent(self) -> Option<FunctionValue<'ctx>> {
         let value = unsafe {
             LLVMGetBasicBlockParent(self.basic_block)
         };
@@ -95,10 +95,8 @@ impl<'ctx> BasicBlock<'ctx> {
     /// assert!(basic_block2.get_previous_basic_block().is_none());
     /// assert_eq!(basic_block3.get_previous_basic_block().unwrap(), basic_block2);
     /// ```
-    pub fn get_previous_basic_block(&self) -> Option<BasicBlock<'ctx>> {
-        if self.get_parent().is_none() {
-            return None;
-        }
+    pub fn get_previous_basic_block(self) -> Option<BasicBlock<'ctx>> {
+        self.get_parent()?;
 
         let bb = unsafe {
             LLVMGetPreviousBasicBlock(self.basic_block)
@@ -134,10 +132,8 @@ impl<'ctx> BasicBlock<'ctx> {
     /// assert_eq!(basic_block2.get_next_basic_block().unwrap(), basic_block3);
     /// assert!(basic_block3.get_next_basic_block().is_none());
     /// ```
-    pub fn get_next_basic_block(&self) -> Option<BasicBlock<'ctx>> {
-        if self.get_parent().is_none() {
-            return None;
-        }
+    pub fn get_next_basic_block(self) -> Option<BasicBlock<'ctx>> {
+        self.get_parent()?;
 
         let bb = unsafe {
             LLVMGetNextBasicBlock(self.basic_block)
@@ -170,7 +166,7 @@ impl<'ctx> BasicBlock<'ctx> {
     /// assert_eq!(basic_block2.get_next_basic_block().unwrap(), basic_block1);
     /// ```
     // REVIEW: What happens if blocks are from different scopes?
-    pub fn move_before(&self, basic_block: BasicBlock<'ctx>) -> Result<(), ()> {
+    pub fn move_before(self, basic_block: BasicBlock<'ctx>) -> Result<(), ()> {
         // This method is UB if the parent no longer exists, so we must check for parent (or encode into type system)
         if self.get_parent().is_none() || basic_block.get_parent().is_none() {
             return Err(());
@@ -207,7 +203,7 @@ impl<'ctx> BasicBlock<'ctx> {
     /// assert_eq!(basic_block2.get_next_basic_block().unwrap(), basic_block1);
     /// ```
     // REVIEW: What happens if blocks are from different scopes?
-    pub fn move_after(&self, basic_block: BasicBlock<'ctx>) -> Result<(), ()> {
+    pub fn move_after(self, basic_block: BasicBlock<'ctx>) -> Result<(), ()> {
         // This method is UB if the parent no longer exists, so we must check for parent (or encode into type system)
         if self.get_parent().is_none() || basic_block.get_parent().is_none() {
             return Err(());
@@ -242,7 +238,7 @@ impl<'ctx> BasicBlock<'ctx> {
     ///
     /// assert_eq!(basic_block.get_first_instruction().unwrap().get_opcode(), InstructionOpcode::Return);
     /// ```
-    pub fn get_first_instruction(&self) -> Option<InstructionValue<'ctx>> {
+    pub fn get_first_instruction(self) -> Option<InstructionValue<'ctx>> {
         let value = unsafe {
             LLVMGetFirstInstruction(self.basic_block)
         };
@@ -276,7 +272,7 @@ impl<'ctx> BasicBlock<'ctx> {
     ///
     /// assert_eq!(basic_block.get_last_instruction().unwrap().get_opcode(), InstructionOpcode::Return);
     /// ```
-    pub fn get_last_instruction(&self) -> Option<InstructionValue<'ctx>> {
+    pub fn get_last_instruction(self) -> Option<InstructionValue<'ctx>> {
         let value = unsafe {
             LLVMGetLastInstruction(self.basic_block)
         };
@@ -314,7 +310,7 @@ impl<'ctx> BasicBlock<'ctx> {
     // if getting a value over an instruction is preferable
     // TODOC: Every BB must have a terminating instruction or else it is invalid
     // REVIEW: Unclear how this differs from get_last_instruction
-    pub fn get_terminator(&self) -> Option<InstructionValue<'ctx>> {
+    pub fn get_terminator(self) -> Option<InstructionValue<'ctx>> {
         let value = unsafe {
             LLVMGetBasicBlockTerminator(self.basic_block)
         };
@@ -352,7 +348,7 @@ impl<'ctx> BasicBlock<'ctx> {
     // by taking ownership of self (though BasicBlock's are not uniquely obtained...)
     // might have to make some methods do something like -> Result<..., BasicBlock<Orphan>> for BasicBlock<HasParent>
     // and would move_before/after make it no longer orphaned? etc..
-    pub fn remove_from_function(&self) -> Result<(), ()> {
+    pub fn remove_from_function(self) -> Result<(), ()> {
         // This method is UB if the parent no longer exists, so we must check for parent (or encode into type system)
         if self.get_parent().is_none() {
             return Err(());
@@ -414,7 +410,7 @@ impl<'ctx> BasicBlock<'ctx> {
     ///
     /// assert_eq!(context, *basic_block.get_context());
     /// ```
-    pub fn get_context(&self) -> ContextRef<'ctx> {
+    pub fn get_context(self) -> ContextRef<'ctx> {
         let context = unsafe {
             LLVMGetTypeContext(LLVMTypeOf(LLVMBasicBlockAsValue(self.basic_block)))
         };
@@ -428,7 +424,6 @@ impl<'ctx> BasicBlock<'ctx> {
     ///
     /// ```no_run
     /// use inkwell::context::Context;
-    /// use std::ffi::CString;
     ///
     /// let context = Context::create();
     /// let builder = context.create_builder();
@@ -438,7 +433,7 @@ impl<'ctx> BasicBlock<'ctx> {
     /// let fn_val = module.add_function("my_fn", fn_type, None);
     /// let bb = context.append_basic_block(fn_val, "entry");
     ///
-    /// assert_eq!(*bb.get_name(), *CString::new("entry").unwrap());
+    /// assert_eq!(bb.get_name().to_str(), Ok("entry"));
     /// ```
     #[llvm_versions(3.9..=latest)]
     pub fn get_name(&self) -> &CStr {
@@ -474,7 +469,7 @@ impl<'ctx> BasicBlock<'ctx> {
     ///
     /// assert_eq!(branch_inst.get_operand(0).unwrap().right().unwrap(), bb2);
     /// ```
-    pub fn replace_all_uses_with(&self, other: &BasicBlock<'ctx>) {
+    pub fn replace_all_uses_with(self, other: &BasicBlock<'ctx>) {
         let value = unsafe { LLVMBasicBlockAsValue(self.basic_block) };
         let other = unsafe { LLVMBasicBlockAsValue(other.basic_block) };
 
@@ -484,6 +479,42 @@ impl<'ctx> BasicBlock<'ctx> {
                 LLVMReplaceAllUsesWith(value, other);
             }
         }
+    }
+
+    /// Gets the first use of this `BasicBlock` if any.
+    ///
+    /// The following example,
+    ///
+    /// ```no_run
+    /// use inkwell::AddressSpace;
+    /// use inkwell::context::Context;
+    /// use inkwell::values::BasicValue;
+    ///
+    /// let context = Context::create();
+    /// let module = context.create_module("ivs");
+    /// let builder = context.create_builder();
+    /// let void_type = context.void_type();
+    /// let fn_type = void_type.fn_type(&[], false);
+    /// let fn_val = module.add_function("my_fn", fn_type, None);
+    /// let entry = context.append_basic_block(fn_val, "entry");
+    /// let bb1 = context.append_basic_block(fn_val, "bb1");
+    /// let bb2 = context.append_basic_block(fn_val, "bb2");
+    /// builder.position_at_end(entry);
+    /// let branch_inst = builder.build_unconditional_branch(bb1);
+    ///
+    /// assert!(bb2.get_first_use().is_none());
+    /// assert!(bb1.get_first_use().is_some());
+    /// ```
+    pub fn get_first_use(self) -> Option<BasicValueUse<'ctx>> {
+        let use_ = unsafe {
+            LLVMGetFirstUse(LLVMBasicBlockAsValue(self.basic_block))
+        };
+
+        if use_.is_null() {
+            return None;
+        }
+
+        Some(BasicValueUse::new(use_))
     }
 }
 

@@ -115,7 +115,7 @@ impl Parse for VersionType {
         // All version specifiers begin with a float
         if lookahead.peek(LitFloat) {
             let from = input.parse::<LitFloat>().unwrap();
-            let from_val = from.value();
+            let from_val = from.base10_parse().unwrap();
             // If that's the end of the input, this was a specific version string
             if input.is_empty() {
                 return Ok(VersionType::Specific(from_val, from.span()));
@@ -128,14 +128,14 @@ impl Parse for VersionType {
                 let lookahead = input.lookahead1();
                 if lookahead.peek(Ident) {
                     let to = input.parse::<Ident>().unwrap();
-                    if to.to_string() == "latest" {
+                    if to == "latest" {
                         Ok(VersionType::InclusiveRangeToLatest(from_val, from.span()))
                     } else {
                         Err(Error::new(to.span(), "expected `latest` or `X.Y`"))
                     }
                 } else if lookahead.peek(LitFloat) {
                     let to = input.parse::<LitFloat>().unwrap();
-                    let to_val = to.value();
+                    let to_val = to.base10_parse().unwrap();
                     Ok(VersionType::InclusiveRange((from_val, from.span()), (to_val, to.span())))
                 } else {
                     Err(lookahead.error())
@@ -145,14 +145,14 @@ impl Parse for VersionType {
                 let lookahead = input.lookahead1();
                 if lookahead.peek(Ident) {
                     let to = input.parse::<Ident>().unwrap();
-                    if to.to_string() == "latest" {
+                    if to == "latest" {
                         Ok(VersionType::ExclusiveRangeToLatest(from_val, from.span()))
                     } else {
                         Err(Error::new(to.span(), "expected `latest` or `X.Y`"))
                     }
                 } else if lookahead.peek(LitFloat) {
                     let to = input.parse::<LitFloat>().unwrap();
-                    let to_val = to.value();
+                    let to_val = to.base10_parse().unwrap();
                     Ok(VersionType::ExclusiveRange((from_val, from.span()), (to_val, to.span())))
                 } else {
                     Err(lookahead.error())
@@ -179,27 +179,26 @@ impl Parse for ParenthesizedFeatureSet {
 }
 
 /// Handler for parsing of TokenStreams from macro input
-#[derive(Debug)]
-struct FeatureSet(Vec<&'static str>, Option<Error>);
+#[derive(Clone, Debug)]
+struct FeatureSet(std::vec::IntoIter<&'static str>, Option<Error>);
 impl Default for FeatureSet {
     fn default() -> Self {
         // Default to all versions
-        Self(FEATURE_VERSIONS.to_vec(), None)
+        Self(FEATURE_VERSIONS.to_vec().into_iter(), None)
     }
 }
 impl Parse for FeatureSet {
     fn parse(input: ParseStream) -> Result<Self> {
         let version_type = input.parse::<VersionType>()?;
         let features = get_features(version_type)?;
-        Ok(Self(features, None))
+        Ok(Self(features.into_iter(), None))
     }
 }
-impl IntoIterator for FeatureSet {
+impl Iterator for FeatureSet {
     type Item = &'static str;
-    type IntoIter = std::vec::IntoIter<&'static str>;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
     }
 }
 impl FeatureSet {
@@ -233,7 +232,7 @@ impl FeatureSet {
         }
 
         // Expand from llvm_versions to raw cfg attribute
-        match syn::parse2::<ParenthesizedFeatureSet>(attr.tts.clone()) {
+        match syn::parse2::<ParenthesizedFeatureSet>(attr.tokens.clone()) {
             Ok(ParenthesizedFeatureSet(features)) => {
                 parse_quote! {
                     #[cfg(any(#(feature = #features),*))]
@@ -308,8 +307,20 @@ pub fn llvm_versions(attribute_args: TokenStream, attributee: TokenStream) -> To
         return features.into_compile_error();
     }
 
+    // Add nightly only doc cfgs to improve documentation on nightly builds
+    // such as our own hosted docs.
+    let doc = if cfg!(feature = "nightly") {
+        let features2 = features.clone();
+        quote! {
+            #[doc(cfg(any(#(feature = #features2),*)))]
+        }
+    } else {
+        quote! {}
+    };
+
     let q = quote! {
         #[cfg(any(#(feature = #features),*))]
+        #doc
         #folded
     };
 
@@ -424,8 +435,8 @@ impl Fold for EnumVariants {
                 if meta.nested.len() == 1 {
                     let variant_meta = meta.nested.first().unwrap();
                     // The element should be an identifier
-                    if let NestedMeta::Meta(Meta::Word(name)) = (*variant_meta.value()).clone() {
-                        self.variants.push(EnumVariant::with_name(&variant, name));
+                    if let NestedMeta::Meta(Meta::Path(name)) = variant_meta {
+                        self.variants.push(EnumVariant::with_name(&variant, name.get_ident().unwrap().clone()));
                         // Strip the llvm_variant attribute from the final AST
                         variant.attrs.retain(|attr| !attr.path.is_ident("llvm_variant"));
                         return variant;
@@ -515,12 +526,18 @@ pub fn llvm_enum(attribute_args: TokenStream, attributee: TokenStream) -> TokenS
     let mut from_arms = Vec::with_capacity(llvm_enum_type.variants.len());
     for variant in llvm_enum_type.variants.iter() {
         let src_variant = variant.llvm_variant.clone();
-        let src_attrs = variant.attrs.clone();
+        // Filter out doc comments or else rustc will warn about docs on match arms in newer versions.
+        let src_attrs: Vec<_> = variant
+            .attrs
+            .iter()
+            .filter(|&attr| !attr.parse_meta().unwrap().path().is_ident("doc"))
+            .collect();
         let src_ty = llvm_ty.clone();
         let dst_variant = variant.rust_variant.clone();
         let dst_ty = llvm_enum_type.name.clone();
 
         let pat = PatPath {
+            attrs: Vec::new(),
             qself: None,
             path: parse_quote!(#src_ty::#src_variant),
         };
@@ -536,12 +553,18 @@ pub fn llvm_enum(attribute_args: TokenStream, attributee: TokenStream) -> TokenS
     let mut to_arms = Vec::with_capacity(llvm_enum_type.variants.len());
     for variant in llvm_enum_type.variants.iter() {
         let src_variant = variant.rust_variant.clone();
-        let src_attrs = variant.attrs.clone();
+        // Filter out doc comments or else rustc will warn about docs on match arms in newer versions.
+        let src_attrs: Vec<_> = variant
+            .attrs
+            .iter()
+            .filter(|&attr| !attr.parse_meta().unwrap().path().is_ident("doc"))
+            .collect();
         let src_ty = llvm_enum_type.name.clone();
         let dst_variant = variant.llvm_variant.clone();
         let dst_ty = llvm_ty.clone();
 
         let pat = PatPath {
+            attrs: Vec::new(),
             qself: None,
             path: parse_quote!(#src_ty::#src_variant),
         };
@@ -554,7 +577,7 @@ pub fn llvm_enum(attribute_args: TokenStream, attributee: TokenStream) -> TokenS
     }
 
     let enum_ty = llvm_enum_type.name.clone();
-    let enum_decl = llvm_enum_type.decl.clone();
+    let enum_decl = llvm_enum_type.decl;
 
     let q = quote! {
         #enum_decl

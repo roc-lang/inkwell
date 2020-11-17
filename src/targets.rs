@@ -26,13 +26,13 @@ use crate::data_layout::DataLayout;
 use crate::memory_buffer::MemoryBuffer;
 use crate::module::Module;
 use crate::passes::PassManager;
-use crate::support::LLVMString;
+use crate::support::{to_c_str, LLVMString};
 use crate::types::{AnyType, AsTypeRef, IntType, StructType};
 use crate::values::{AsValueRef, GlobalValue};
 use crate::{AddressSpace, OptimizationLevel};
 
 use std::default::Default;
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::fmt;
 use std::mem::MaybeUninit;
 use std::path::Path;
@@ -108,10 +108,10 @@ impl TargetTriple {
     }
 
     pub fn create(triple: &str) -> TargetTriple {
-        let c_string = CString::new(triple).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(triple);
 
         TargetTriple {
-            triple: LLVMString::create_from_c_str(c_string.as_c_str())
+            triple: LLVMString::create_from_c_str(&c_string)
         }
     }
 
@@ -743,14 +743,13 @@ impl Target {
         }
     }
 
-    // REVIEW: As it turns out; RISCV was accidentally built by default in 4.0 since
-    // it was meant to be marked experimental and so it was later removed from default
-    // builds in 5.0+. Since llvm-sys doesn't officially support any experimental targets
-    // we're going to make this 4.0 only for now so that it doesn't break test builds.
-    // We can revisit this issue if someone wants RISCV support in inkwell, or if
-    // llvm-sys starts supporting experimental llvm targets. See
-    // https://lists.llvm.org/pipermail/llvm-dev/2017-August/116347.html for more info
-    #[llvm_versions(4.0)]
+    // RISCV was accidentally built by default in 4.0 since it was meant to be marked
+    // experimental and so it was later removed from default builds in 5.0 until it was
+    // officially released in 9.0 Since llvm-sys doesn't officially support any experimental
+    // targets we're going to make this 9.0+ only. See
+    // https://lists.llvm.org/pipermail/llvm-dev/2017-August/116347.html for more info.
+    #[cfg(feature = "target-riscv")]
+    #[llvm_versions(9.0..=latest)]
     pub fn initialize_riscv(config: &InitializationConfig) {
         use llvm_sys::target::{
             LLVMInitializeRISCVTarget, LLVMInitializeRISCVTargetInfo, LLVMInitializeRISCVTargetMC,
@@ -911,8 +910,8 @@ impl Target {
         reloc_mode: RelocMode,
         code_model: CodeModel,
     ) -> Option<TargetMachine> {
-        let cpu = CString::new(cpu).expect("Conversion to CString failed unexpectedly");
-        let features = CString::new(features).expect("Conversion to CString failed unexpectedly");
+        let cpu = to_c_str(cpu);
+        let features = to_c_str(features);
         let level = match level {
             OptimizationLevel::None => LLVMCodeGenOptLevel::LLVMCodeGenLevelNone,
             OptimizationLevel::Less => LLVMCodeGenOptLevel::LLVMCodeGenLevelLess,
@@ -984,7 +983,7 @@ impl Target {
     }
 
     pub fn from_name(name: &str) -> Option<Self> {
-        let c_string = CString::new(name).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(name);
 
         Self::from_name_raw(c_string.as_ptr())
     }
@@ -1063,11 +1062,9 @@ impl TargetMachine {
     /// ```no_run
     /// use inkwell::targets::TargetMachine;
     ///
-    /// use std::ffi::CString;
-    ///
     /// let default_triple = TargetMachine::get_default_triple();
     ///
-    /// assert_eq!(default_triple.as_str(), CString::new("x86_64-pc-linux-gnu").unwrap().as_c_str());
+    /// assert_eq!(default_triple.as_str().to_str(), Ok("x86_64-pc-linux-gnu"));
     /// ```
     pub fn get_default_triple() -> TargetTriple {
         let llvm_string = unsafe { LLVMGetDefaultTargetTriple() };
@@ -1247,7 +1244,7 @@ impl TargetMachine {
         let path = path
             .to_str()
             .expect("Did not find a valid Unicode path string");
-        let path_c_string = CString::new(path).expect("Conversion to CString failed unexpectedly");
+        let path_c_string = to_c_str(path);
         let mut err_string = MaybeUninit::uninit();
         let return_code = unsafe {
             // REVIEW: Why does LLVM need a mutable ptr to path...?
@@ -1295,7 +1292,7 @@ impl TargetData {
         assert!(!target_data.is_null());
 
         TargetData {
-            target_data: target_data,
+            target_data,
         }
     }
 
@@ -1316,11 +1313,12 @@ impl TargetData {
     /// let target_data = execution_engine.get_target_data();
     /// let int_type = target_data.ptr_sized_int_type_in_context(&context, None);
     /// ```
-    pub fn ptr_sized_int_type_in_context(
+    #[deprecated(note = "This method will be removed in the future. Please use Context::ptr_sized_int_type instead.")]
+    pub fn ptr_sized_int_type_in_context<'ctx>(
         &self,
-        context: &Context,
+        context: &'ctx Context,
         address_space: Option<AddressSpace>,
-    ) -> IntType {
+    ) -> IntType<'ctx> {
         let int_type_ptr = match address_space {
             Some(address_space) => unsafe {
                 LLVMIntPtrTypeForASInContext(
@@ -1348,7 +1346,7 @@ impl TargetData {
 
     // TODOC: This can fail on LLVM's side(exit?), but it doesn't seem like we have any way to check this in rust
     pub fn create(str_repr: &str) -> TargetData {
-        let c_string = CString::new(str_repr).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(str_repr);
 
         let target_data = unsafe { LLVMCreateTargetData(c_string.as_ptr()) };
 

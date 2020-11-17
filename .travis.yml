@@ -1,12 +1,11 @@
 language: rust
-
 sudo: required
 cache:
   directories:
     - /home/travis/.cargo
 
 before_cache:
-  - RUSTFLAGS="--cfg procmacro2_semver_exempt" cargo install cargo-tarpaulin
+  - cargo install cargo-tarpaulin
   - rm -rf /home/travis/.cargo/registry
 include_base: &BASE
   addons:
@@ -23,13 +22,11 @@ include_base: &BASE
         - libssl-dev
   before_install:
     - export LLVM_VERSION_DASH=${LLVM_VERSION/./-}
-    - export LLVM_VERSION_SHORT=${LLVM_VERSION/./}
     - export PATH=/usr/lib/llvm-${LLVM_VERSION}/bin/:$HOME/.local/bin:$PATH
     - export LLVM_PATH=/usr/share/llvm-${LLVM_VERSION}/cmake/
-    - sed -i -e 's/llvm-sys = ".*"/llvm-sys = "'${LLVM_VERSION_SHORT}'"/' Cargo.toml
   script:
-    - cargo build --no-default-features --features "target-all,llvm${LLVM_VERSION_DASH}" --color=always
-    - cargo test --no-default-features --features "target-all,llvm${LLVM_VERSION_DASH}" --verbose --color=always
+    - cargo build --features "target-all,llvm${LLVM_VERSION_DASH}" --color=always
+    - cargo test --features "target-all,llvm${LLVM_VERSION_DASH}" --verbose --color=always
 
 matrix:
   fast_finish: true
@@ -45,7 +42,7 @@ matrix:
           packages:
             - *BASE_PACKAGES
             - llvm-3.6-dev
-      rust: nightly-2019-07-25
+      rust: 1.39.0
       dist: trusty
     - env:
         - LLVM_VERSION="3.7"
@@ -58,7 +55,7 @@ matrix:
           packages:
             - *BASE_PACKAGES
             - llvm-3.7-dev
-      rust: nightly-2019-07-25
+      rust: 1.39.0
       dist: trusty
     - env:
         - LLVM_VERSION="3.8"
@@ -71,7 +68,7 @@ matrix:
           packages:
             - *BASE_PACKAGES
             - llvm-3.8-dev
-      rust: nightly-2019-07-25
+      rust: 1.39.0
       dist: trusty
     # 3.9 seems to have a linking issue :/
     # - env:
@@ -81,12 +78,13 @@ matrix:
     #     apt:
     #       sources:
     #         - *BASE_SOURCES
-    #         - llvm-toolchain-trusty-3.9
+    #         - sourceline: 'deb https://apt.llvm.org/xenial/ llvm-toolchain-xenial-3.9 main'
+    #           key_url: 'https://apt.llvm.org/llvm-snapshot.gpg.key'
     #       packages:
     #         - *BASE_PACKAGES
     #         - llvm-3.9-dev
-    #       rust: nightly-2019-07-25
-    #       dist: trusty
+    #   rust: 1.39.0
+    #   dist: xenial
     - env:
         - LLVM_VERSION="4.0"
       <<: *BASE
@@ -98,7 +96,7 @@ matrix:
           packages:
             - *BASE_PACKAGES
             - llvm-4.0-dev
-      rust: nightly-2019-07-25
+      rust: 1.39.0
       dist: trusty
     - env:
         - LLVM_VERSION="5.0"
@@ -111,7 +109,7 @@ matrix:
           packages:
             - *BASE_PACKAGES
             - llvm-5.0-dev
-      rust: nightly-2019-07-25
+      rust: 1.39.0
       dist: trusty
     - env:
         - LLVM_VERSION="6.0"
@@ -124,7 +122,7 @@ matrix:
           packages:
             - *BASE_PACKAGES
             - llvm-6.0-dev
-      rust: nightly-2019-07-25
+      rust: 1.39.0
       dist: trusty
     - env:
         - LLVM_VERSION="7.0"
@@ -137,7 +135,7 @@ matrix:
           packages:
             - *BASE_PACKAGES
             - llvm-7-dev
-      rust: nightly-2019-07-25
+      rust: 1.39.0
       dist: trusty
     - env:
         - LLVM_VERSION="8.0"
@@ -150,7 +148,7 @@ matrix:
           packages:
             - *BASE_PACKAGES
             - llvm-8-dev
-      rust: nightly-2019-07-25
+      rust: 1.39.0
       dist: trusty
     - env:
         - LLVM_VERSION="9.0"
@@ -165,7 +163,7 @@ matrix:
           packages:
             - *BASE_PACKAGES
             - llvm-9-dev
-      rust: nightly-2019-07-25
+      rust: 1.39.0
       dist: bionic
     - env:
         - LLVM_VERSION="10.0"
@@ -180,7 +178,8 @@ matrix:
           packages:
             - *BASE_PACKAGES
             - llvm-10-dev
-      rust: nightly-2019-07-25
+            - libclang-common-10-dev
+      rust: 1.39.0
       dist: bionic
     - deploy: # Documentation build; Only latest supported LLVM version for now
         provider: pages
@@ -194,7 +193,7 @@ matrix:
         - export PATH=/usr/lib/llvm-10/bin/:$HOME/.local/bin:$PATH
         - export LLVM_PATH=/usr/share/llvm-10/cmake/
       script:
-        - cargo doc --no-default-features --features "target-all,llvm10-0" --color=always
+        - cargo doc --no-default-features --features "target-all,llvm10-0,nightly" --color=always
         - echo '<meta http-equiv="refresh" content="1; url=inkwell/index.html">' > target/doc/index.html
       rust: nightly
       name: "GitHub IO Documentation Deployment"
@@ -235,7 +234,7 @@ env:
     - RUSTFLAGS="-C link-dead-code -C target-cpu=native -l ffi"
 
 after_success: |
-  if [[ "$TRAVIS_RUST_VERSION" == nightly-2019-07-25 ]]; then
+  if [[ "$TRAVIS_RUST_VERSION" == 1.39.0 ]]; then
     cargo tarpaulin --features "llvm${LLVM_VERSION_DASH}" --out Xml
     bash <(curl -s https://codecov.io/bash)
   fi

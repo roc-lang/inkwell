@@ -1,27 +1,35 @@
 //! A `Context` is an opaque owner and manager of core global data.
 
 use llvm_sys::core::{LLVMAppendBasicBlockInContext, LLVMContextCreate, LLVMContextDispose, LLVMCreateBuilderInContext, LLVMDoubleTypeInContext, LLVMFloatTypeInContext, LLVMFP128TypeInContext, LLVMInsertBasicBlockInContext, LLVMInt16TypeInContext, LLVMInt1TypeInContext, LLVMInt32TypeInContext, LLVMInt64TypeInContext, LLVMInt8TypeInContext, LLVMIntTypeInContext, LLVMModuleCreateWithNameInContext, LLVMStructCreateNamed, LLVMStructTypeInContext, LLVMVoidTypeInContext, LLVMHalfTypeInContext, LLVMGetGlobalContext, LLVMPPCFP128TypeInContext, LLVMConstStructInContext, LLVMMDNodeInContext, LLVMMDStringInContext, LLVMGetMDKindIDInContext, LLVMX86FP80TypeInContext, LLVMConstStringInContext, LLVMContextSetDiagnosticHandler};
-#[llvm_versions(4.0..=latest)]
+#[llvm_versions(3.9..=latest)]
 use llvm_sys::core::{LLVMCreateEnumAttribute, LLVMCreateStringAttribute};
+#[llvm_versions(3.6..7.0)]
+use llvm_sys::core::{LLVMConstInlineAsm};
+#[llvm_versions(7.0..=latest)]
+use llvm_sys::core::{LLVMGetInlineAsm};
+#[llvm_versions(7.0..=latest)]
+use crate::InlineAsmDialect;
 use llvm_sys::prelude::{LLVMContextRef, LLVMTypeRef, LLVMValueRef, LLVMDiagnosticInfoRef};
 use llvm_sys::ir_reader::LLVMParseIRInContext;
+use llvm_sys::target::{LLVMIntPtrTypeForASInContext, LLVMIntPtrTypeInContext};
 use libc::c_void;
 use once_cell::sync::Lazy;
 use parking_lot::{Mutex, MutexGuard};
 
-#[llvm_versions(4.0..=latest)]
+use crate::AddressSpace;
+#[llvm_versions(3.9..=latest)]
 use crate::attributes::Attribute;
 use crate::basic_block::BasicBlock;
 use crate::builder::Builder;
 use crate::memory_buffer::MemoryBuffer;
 use crate::module::Module;
-use crate::support::LLVMString;
-use crate::types::{BasicTypeEnum, FloatType, IntType, StructType, VoidType, AsTypeRef};
-use crate::values::{AsValueRef, BasicMetadataValueEnum, BasicValueEnum, FunctionValue, StructValue, MetadataValue, VectorValue};
+use crate::support::{to_c_str, LLVMString};
+use crate::targets::TargetData;
+use crate::types::{BasicTypeEnum, FloatType, IntType, StructType, VoidType, AsTypeRef, FunctionType};
+use crate::values::{AsValueRef, BasicMetadataValueEnum, BasicValueEnum, FunctionValue, StructValue, MetadataValue, VectorValue, PointerValue};
 
-use std::ffi::CString;
 use std::marker::PhantomData;
-use std::mem::forget;
+use std::mem::{forget, ManuallyDrop};
 use std::ops::Deref;
 use std::ptr;
 use std::thread_local;
@@ -51,14 +59,7 @@ thread_local! {
 ///
 /// A `Context` is not thread safe and cannot be shared across threads. Multiple `Context`s
 /// can, however, execute on different threads simultaneously according to the LLVM docs.
-///
-/// # Note
-///
-/// Cloning this object is essentially just a case of copying a couple pointers
-/// and incrementing one or two atomics, so this should be quite cheap to create
-/// copies. The underlying LLVM object will be automatically deallocated when
-/// there are no more references to it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Context {
     pub(crate) context: LLVMContextRef,
 }
@@ -144,13 +145,13 @@ impl Context {
     /// let module = context.create_module("my_module");
     /// ```
     pub fn create_module(&self, name: &str) -> Module {
-        let c_string = CString::new(name).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(name);
 
         let module = unsafe {
             LLVMModuleCreateWithNameInContext(c_string.as_ptr(), self.context)
         };
 
-        Module::new(module, Some(&self))
+        Module::new(module)
     }
 
     /// Creates a new `Module` for the current `Context` from a `MemoryBuffer`.
@@ -190,10 +191,80 @@ impl Context {
         forget(memory_buffer);
 
         if code == 0 {
-            return Ok(Module::new(module, Some(&self)));
+            return Ok(Module::new(module));
         }
 
         Err(LLVMString::new(err_str))
+    }
+
+    /// Creates a inline asm function pointer.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use inkwell::context::Context;
+    ///
+    /// let context = Context::create();
+    /// let module = context.create_module("my_module");
+    /// let builder = context.create_builder();
+    /// let void_type = context.void_type();
+    /// let fn_type = void_type.fn_type(&[], false);
+    /// let fn_val = module.add_function("my_fn", fn_type, None);
+    /// let basic_block = context.append_basic_block(fn_val, "entry");
+    ///
+    /// builder.position_at_end(basic_block);
+    /// let asm_fn = context.i64_type().fn_type(&[context.i64_type().into(), context.i64_type().into()], false);
+    /// let asm = context.create_inline_asm(asm_fn, "syscall".to_string(), "=r,{rax},{rdi}".to_string(), true, false, None);
+    /// let params = &[context.i64_type().const_int(60, false).into(), context.i64_type().const_int(1, false).into()];
+    /// builder.build_call(asm, params, "exit");
+    /// builder.build_return(None);
+    #[llvm_versions(7.0..=latest)]
+    pub fn create_inline_asm(&self, ty: FunctionType, mut assembly: String, mut constraints: String, sideeffects: bool, alignstack: bool, dialect: Option<InlineAsmDialect>) -> PointerValue {
+        let value = unsafe {
+            LLVMGetInlineAsm(
+                ty.as_type_ref(),
+                assembly.as_mut_ptr() as *mut ::libc::c_char,
+                assembly.len(),
+                constraints.as_mut_ptr() as *mut ::libc::c_char,
+                constraints.len(),
+                sideeffects as i32,
+                alignstack as i32,
+                dialect.unwrap_or(InlineAsmDialect::ATT).into()
+            )
+        };
+        PointerValue::new(value)
+    }
+    /// Creates a inline asm function pointer.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use inkwell::context::Context;
+    ///
+    /// let context = Context::create();
+    /// let module = context.create_module("my_module");
+    /// let builder = context.create_builder();
+    /// let void_type = context.void_type();
+    /// let fn_type = void_type.fn_type(&[], false);
+    /// let fn_val = module.add_function("my_fn", fn_type, None);
+    /// let basic_block = context.append_basic_block(fn_val, "entry");
+    ///
+    /// builder.position_at_end(basic_block);
+    /// let asm_fn = context.i64_type().fn_type(&[context.i64_type().into(), context.i64_type().into()], false);
+    /// let asm = context.create_inline_asm(asm_fn, "syscall".to_string(), "=r,{rax},{rdi}".to_string(), true, false);
+    /// let params = &[context.i64_type().const_int(60, false).into(), context.i64_type().const_int(1, false).into()];
+    /// builder.build_call(asm, params, "exit");
+    /// builder.build_return(None);
+    #[llvm_versions(3.6..7.0)]
+    pub fn create_inline_asm(&self, ty: FunctionType, assembly: String, constraints: String, sideeffects: bool, alignstack: bool) -> PointerValue {
+        let value = unsafe {
+            LLVMConstInlineAsm(
+                ty.as_type_ref(),
+                assembly.as_ptr() as *const ::libc::c_char,
+                constraints.as_ptr() as *const ::libc::c_char,
+                sideeffects as i32,
+                alignstack as i32
+            )
+        };
+        PointerValue::new(value)
     }
 
     /// Gets the `VoidType`. It will be assigned the current context.
@@ -360,6 +431,42 @@ impl Context {
         };
 
         IntType::new(int_type)
+    }
+
+    /// Gets the `IntType` representing a bit width of a pointer. It will be assigned the referenced context.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use inkwell::OptimizationLevel;
+    /// use inkwell::context::Context;
+    /// use inkwell::targets::{InitializationConfig, Target};
+    ///
+    /// Target::initialize_native(&InitializationConfig::default()).expect("Failed to initialize native target");
+    ///
+    /// let context = Context::create();
+    /// let module = context.create_module("sum");
+    /// let execution_engine = module.create_jit_execution_engine(OptimizationLevel::None).unwrap();
+    /// let target_data = execution_engine.get_target_data();
+    /// let int_type = context.ptr_sized_int_type(&target_data, None);
+    /// ```
+    pub fn ptr_sized_int_type(
+        &self,
+        target_data: &TargetData,
+        address_space: Option<AddressSpace>,
+    ) -> IntType {
+        let int_type_ptr = match address_space {
+            Some(address_space) => unsafe {
+                LLVMIntPtrTypeForASInContext(
+                    self.context,
+                    target_data.target_data,
+                    address_space as u32,
+                )
+            },
+            None => unsafe { LLVMIntPtrTypeInContext(self.context, target_data.target_data) },
+        };
+
+        IntType::new(int_type_ptr)
     }
 
     /// Gets the `FloatType` representing a 16 bit width. It will be assigned the current context.
@@ -533,7 +640,7 @@ impl Context {
     /// assert_eq!(struct_type.get_field_types(), &[]);
     /// ```
     pub fn opaque_struct_type(&self, name: &str) -> StructType {
-        let c_string = CString::new(name).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(name);
 
         let struct_type = unsafe {
             LLVMStructCreateNamed(self.context, c_string.as_ptr())
@@ -592,7 +699,7 @@ impl Context {
     /// assert_eq!(fn_value.get_last_basic_block().unwrap(), last_basic_block);
     /// ```
     pub fn append_basic_block(&self, function: FunctionValue, name: &str) -> BasicBlock {
-        let c_string = CString::new(name).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(name);
 
         let bb = unsafe {
             LLVMAppendBasicBlockInContext(self.context, function.as_value_ref(), c_string.as_ptr())
@@ -660,7 +767,7 @@ impl Context {
     /// assert_eq!(fn_value.get_last_basic_block().unwrap(), entry_basic_block);
     /// ```
     pub fn prepend_basic_block(&self, basic_block: BasicBlock, name: &str) -> BasicBlock {
-        let c_string = CString::new(name).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(name);
 
         let bb = unsafe {
             LLVMInsertBasicBlockInContext(self.context, basic_block.basic_block, c_string.as_ptr())
@@ -741,7 +848,7 @@ impl Context {
     /// ```
     // REVIEW: Seems to be unassigned to anything
     pub fn metadata_string(&self, string: &str) -> MetadataValue {
-        let c_string = CString::new(string).expect("Conversion to CString failed unexpectedly");
+        let c_string = to_c_str(string);
 
         let metadata_value = unsafe {
             LLVMMDStringInContext(self.context, c_string.as_ptr(), string.len() as u32)
@@ -796,7 +903,7 @@ impl Context {
     ///
     /// assert!(enum_attribute.is_enum());
     /// ```
-    #[llvm_versions(4.0..=latest)]
+    #[llvm_versions(3.9..=latest)]
     pub fn create_enum_attribute(&self, kind_id: u32, val: u64) -> Attribute {
         let attribute = unsafe {
             LLVMCreateEnumAttribute(self.context, kind_id, val)
@@ -817,7 +924,7 @@ impl Context {
     ///
     /// assert!(string_attribute.is_string());
     /// ```
-    #[llvm_versions(4.0..=latest)]
+    #[llvm_versions(3.9..=latest)]
     pub fn create_string_attribute(&self, key: &str, val: &str) -> Attribute {
         let attribute = unsafe {
             LLVMCreateStringAttribute(self.context, key.as_ptr() as *const _, key.len() as u32, val.as_ptr() as *const _, val.len() as u32)
@@ -862,27 +969,32 @@ impl Drop for Context {
     }
 }
 
-// Alternate strategy would be to just define ownership parameter
-// on Context, and only call destructor if true. Not sure of pros/cons
-// compared to this approach other than not needing Deref trait's ugly syntax
-// REVIEW: Now that Contexts are ref counted, it may not be necessary to
-// have this ContextRef type, however Global Contexts throw a wrench in that
-// a bit as it is a special case. get_context() methods as well since they do
-// not have access to the original Rc. I suppose Context could be Option<Rc<LLVMContextRef>>
-// where None is global context
-/// A `ContextRef` is a smart pointer allowing borrowed access to a a type's `Context`.
+/// A `ContextRef` is a smart pointer allowing borrowed access to a type's `Context`.
 #[derive(Debug, PartialEq, Eq)]
 pub struct ContextRef<'ctx> {
-    context: Option<Context>,
+    context: ManuallyDrop<Context>,
     _marker: PhantomData<&'ctx ()>,
 }
 
-impl ContextRef<'_> {
+impl<'ctx> ContextRef<'ctx> {
     pub(crate) fn new(context: LLVMContextRef) -> Self {
         ContextRef {
-            context: Some(Context::new(context)),
+            context: ManuallyDrop::new(Context::new(context)),
             _marker: PhantomData,
         }
+    }
+
+    /// Gets a usable context object with a correct lifetime.
+    // FIXME: Not safe :(
+    #[cfg(feature = "experimental")]
+    pub unsafe fn get(&self) -> &'ctx Context {
+        // Safety: Although strictly untrue that a local reference to the context field
+        // is guaranteed to live for the entirety of 'ctx:
+        // 1) ContextRef cannot outlive 'ctx
+        // 2) Any method called called with this context object will inherit 'ctx,
+        // which is its proper lifetime and does not point into this context object
+        // specifically but towards the actual context pointer in LLVM.
+        &*(&*self.context as *const Context)
     }
 }
 
@@ -890,12 +1002,6 @@ impl Deref for ContextRef<'_> {
     type Target = Context;
 
     fn deref(&self) -> &Self::Target {
-        self.context.as_ref().expect("ContextRef should never be deref'd after being dropped")
-    }
-}
-
-impl Drop for ContextRef<'_> {
-    fn drop(&mut self) {
-        forget(self.context.take());
+        &*self.context
     }
 }

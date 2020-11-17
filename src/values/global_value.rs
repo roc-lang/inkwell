@@ -9,17 +9,21 @@ use llvm_sys::core::{LLVMHasUnnamedAddr, LLVMSetUnnamedAddr};
 use llvm_sys::core::{LLVMGetUnnamedAddress, LLVMSetUnnamedAddress};
 #[llvm_versions(7.0..=latest)]
 use llvm_sys::LLVMUnnamedAddr;
+#[llvm_versions(8.0..=latest)]
+use llvm_sys::core::LLVMGlobalSetMetadata;
 use llvm_sys::prelude::LLVMValueRef;
 
-use std::ffi::{CString, CStr};
+use std::ffi::CStr;
 
 use crate::{GlobalVisibility, ThreadLocalMode, DLLStorageClass};
 use crate::module::Linkage;
-use crate::support::LLVMString;
+use crate::support::{to_c_str, LLVMString};
 #[llvm_versions(7.0..=latest)]
 use crate::comdat::Comdat;
 use crate::values::traits::AsValueRef;
 use crate::values::{BasicValueEnum, BasicValue, PointerValue, Value};
+#[llvm_versions(8.0..=latest)]
+use crate::values::MetadataValue;
 
 // REVIEW: GlobalValues are always PointerValues. With SubTypes, we should
 // compress this into a PointerValue<Global> type
@@ -37,7 +41,12 @@ impl<'ctx> GlobalValue<'ctx> {
         }
     }
 
-    pub fn get_previous_global(&self) -> Option<GlobalValue<'ctx>> {
+    /// Gets the name of a `GlobalValue`.
+    pub fn get_name(&self) -> &CStr {
+        self.global_value.get_name()
+    }
+
+    pub fn get_previous_global(self) -> Option<GlobalValue<'ctx>> {
         let value = unsafe {
             LLVMGetPreviousGlobal(self.as_value_ref())
         };
@@ -49,7 +58,7 @@ impl<'ctx> GlobalValue<'ctx> {
         Some(GlobalValue::new(value))
     }
 
-    pub fn get_next_global(&self) -> Option<GlobalValue<'ctx>> {
+    pub fn get_next_global(self) -> Option<GlobalValue<'ctx>> {
         let value = unsafe {
             LLVMGetNextGlobal(self.as_value_ref())
         };
@@ -61,7 +70,7 @@ impl<'ctx> GlobalValue<'ctx> {
         Some(GlobalValue::new(value))
     }
 
-    pub fn get_dll_storage_class(&self) -> DLLStorageClass {
+    pub fn get_dll_storage_class(self) -> DLLStorageClass {
         let dll_storage_class = unsafe {
             LLVMGetDLLStorageClass(self.as_value_ref())
         };
@@ -69,13 +78,13 @@ impl<'ctx> GlobalValue<'ctx> {
         DLLStorageClass::new(dll_storage_class)
     }
 
-    pub fn set_dll_storage_class(&self, dll_storage_class: DLLStorageClass) {
+    pub fn set_dll_storage_class(self, dll_storage_class: DLLStorageClass) {
         unsafe {
-            LLVMSetDLLStorageClass(self.as_value_ref(), dll_storage_class.as_llvm_enum())
+            LLVMSetDLLStorageClass(self.as_value_ref(), dll_storage_class.into())
         }
     }
 
-    pub fn get_initializer(&self) -> Option<BasicValueEnum<'ctx>> {
+    pub fn get_initializer(self) -> Option<BasicValueEnum<'ctx>> {
         let value = unsafe {
             LLVMGetInitializer(self.as_value_ref())
         };
@@ -88,26 +97,26 @@ impl<'ctx> GlobalValue<'ctx> {
     }
 
     // SubType: This input type should be tied to the BasicType
-    pub fn set_initializer(&self, value: &dyn BasicValue<'ctx>) {
+    pub fn set_initializer(self, value: &dyn BasicValue<'ctx>) {
         unsafe {
             LLVMSetInitializer(self.as_value_ref(), value.as_value_ref())
         }
     }
 
-    pub fn is_thread_local(&self) -> bool {
+    pub fn is_thread_local(self) -> bool {
         unsafe {
             LLVMIsThreadLocal(self.as_value_ref()) == 1
         }
     }
 
     // TODOC: Setting this to true is the same as setting GeneralDynamicTLSModel
-    pub fn set_thread_local(&self, is_thread_local: bool) {
+    pub fn set_thread_local(self, is_thread_local: bool) {
         unsafe {
             LLVMSetThreadLocal(self.as_value_ref(), is_thread_local as i32)
         }
     }
 
-    pub fn get_thread_local_mode(&self) -> Option<ThreadLocalMode> {
+    pub fn get_thread_local_mode(self) -> Option<ThreadLocalMode> {
         let thread_local_mode = unsafe {
             LLVMGetThreadLocalMode(self.as_value_ref())
         };
@@ -117,7 +126,7 @@ impl<'ctx> GlobalValue<'ctx> {
 
     // REVIEW: Does this have any bad behavior if it isn't thread local or just a noop?
     // or should it call self.set_thread_local(true)?
-    pub fn set_thread_local_mode(&self, thread_local_mode: Option<ThreadLocalMode>) {
+    pub fn set_thread_local_mode(self, thread_local_mode: Option<ThreadLocalMode>) {
         let thread_local_mode = match thread_local_mode {
             Some(mode) => mode.as_llvm_mode(),
             None => LLVMThreadLocalMode::LLVMNotThreadLocal,
@@ -149,21 +158,21 @@ impl<'ctx> GlobalValue<'ctx> {
     ///
     /// assert!(!fn_value.as_global_value().is_declaration());
     /// ```
-    pub fn is_declaration(&self) -> bool {
+    pub fn is_declaration(self) -> bool {
         unsafe {
             LLVMIsDeclaration(self.as_value_ref()) == 1
         }
     }
 
     #[llvm_versions(3.6..7.0)]
-    pub fn has_unnamed_addr(&self) -> bool {
+    pub fn has_unnamed_addr(self) -> bool {
         unsafe {
             LLVMHasUnnamedAddr(self.as_value_ref()) == 1
         }
     }
 
     #[llvm_versions(7.0..=latest)]
-    pub fn has_unnamed_addr(&self) -> bool {
+    pub fn has_unnamed_addr(self) -> bool {
         unsafe {
             LLVMGetUnnamedAddress(self.as_value_ref()) == LLVMUnnamedAddr::LLVMGlobalUnnamedAddr
         }
@@ -171,14 +180,14 @@ impl<'ctx> GlobalValue<'ctx> {
 
 
     #[llvm_versions(3.6..7.0)]
-    pub fn set_unnamed_addr(&self, has_unnamed_addr: bool) {
+    pub fn set_unnamed_addr(self, has_unnamed_addr: bool) {
         unsafe {
             LLVMSetUnnamedAddr(self.as_value_ref(), has_unnamed_addr as i32)
         }
     }
 
     #[llvm_versions(7.0..=latest)]
-    pub fn set_unnamed_addr(&self, has_unnamed_addr: bool) {
+    pub fn set_unnamed_addr(self, has_unnamed_addr: bool) {
         unsafe {
             if has_unnamed_addr {
                 LLVMSetUnnamedAddress(self.as_value_ref(), UnnamedAddress::Global.into())
@@ -188,37 +197,37 @@ impl<'ctx> GlobalValue<'ctx> {
         }
     }
 
-    pub fn is_constant(&self) -> bool {
+    pub fn is_constant(self) -> bool {
         unsafe {
             LLVMIsGlobalConstant(self.as_value_ref()) == 1
         }
     }
 
-    pub fn set_constant(&self, is_constant: bool) {
+    pub fn set_constant(self, is_constant: bool) {
         unsafe {
             LLVMSetGlobalConstant(self.as_value_ref(), is_constant as i32)
         }
     }
 
-    pub fn is_externally_initialized(&self) -> bool {
+    pub fn is_externally_initialized(self) -> bool {
         unsafe {
             LLVMIsExternallyInitialized(self.as_value_ref()) == 1
         }
     }
 
-    pub fn set_externally_initialized(&self, externally_initialized: bool) {
+    pub fn set_externally_initialized(self, externally_initialized: bool) {
         unsafe {
             LLVMSetExternallyInitialized(self.as_value_ref(), externally_initialized as i32)
         }
     }
 
-    pub fn set_visibility(&self, visibility: GlobalVisibility) {
+    pub fn set_visibility(self, visibility: GlobalVisibility) {
         unsafe {
-            LLVMSetVisibility(self.as_value_ref(), visibility.as_llvm_enum())
+            LLVMSetVisibility(self.as_value_ref(), visibility.into())
         }
     }
 
-    pub fn get_visibility(&self) -> GlobalVisibility {
+    pub fn get_visibility(self) -> GlobalVisibility {
         let visibility = unsafe {
             LLVMGetVisibility(self.as_value_ref())
         };
@@ -232,8 +241,8 @@ impl<'ctx> GlobalValue<'ctx> {
         }
     }
 
-    pub fn set_section(&self, section: &str) {
-        let c_string = CString::new(section).expect("Conversion to CString failed unexpectedly");
+    pub fn set_section(self, section: &str) {
+        let c_string = to_c_str(section);
 
         unsafe {
             LLVMSetSection(self.as_value_ref(), c_string.as_ptr())
@@ -244,25 +253,33 @@ impl<'ctx> GlobalValue<'ctx> {
         LLVMDeleteGlobal(self.as_value_ref())
     }
 
-    pub fn as_pointer_value(&self) -> PointerValue<'ctx> {
+    pub fn as_pointer_value(self) -> PointerValue<'ctx> {
         PointerValue::new(self.as_value_ref())
     }
 
-    pub fn get_alignment(&self) -> u32 {
+    pub fn get_alignment(self) -> u32 {
         unsafe {
             LLVMGetAlignment(self.as_value_ref())
         }
     }
 
-    pub fn set_alignment(&self, alignment: u32) {
+    pub fn set_alignment(self, alignment: u32) {
         unsafe {
             LLVMSetAlignment(self.as_value_ref(), alignment)
         }
     }
 
+    /// Sets a metadata of the given type on the GlobalValue
+    #[llvm_versions(8.0..=latest)]
+    pub fn set_metadata(self, metadata: MetadataValue<'ctx>, kind_id: u32) {
+        unsafe {
+            LLVMGlobalSetMetadata(self.as_value_ref(), kind_id, metadata.as_metadata_ref())
+        }
+    }
+
     /// Gets a `Comdat` assigned to this `GlobalValue`, if any.
     #[llvm_versions(7.0..=latest)]
-    pub fn get_comdat(&self) -> Option<Comdat> {
+    pub fn get_comdat(self) -> Option<Comdat> {
         use llvm_sys::comdat::LLVMGetComdat;
 
         let comdat_ptr = unsafe {
@@ -278,7 +295,7 @@ impl<'ctx> GlobalValue<'ctx> {
 
     /// Assigns a `Comdat` to this `GlobalValue`.
     #[llvm_versions(7.0..=latest)]
-    pub fn set_comdat(&self, comdat: Comdat) {
+    pub fn set_comdat(self, comdat: Comdat) {
         use llvm_sys::comdat::LLVMSetComdat;
 
         unsafe {
@@ -287,7 +304,7 @@ impl<'ctx> GlobalValue<'ctx> {
     }
 
     #[llvm_versions(7.0..=latest)]
-    pub fn get_unnamed_address(&self) -> UnnamedAddress {
+    pub fn get_unnamed_address(self) -> UnnamedAddress {
         use llvm_sys::core::LLVMGetUnnamedAddress;
 
         let unnamed_address = unsafe {
@@ -298,7 +315,7 @@ impl<'ctx> GlobalValue<'ctx> {
     }
 
     #[llvm_versions(7.0..=latest)]
-    pub fn set_unnamed_address(&self, address: UnnamedAddress) {
+    pub fn set_unnamed_address(self, address: UnnamedAddress) {
         use llvm_sys::core::LLVMSetUnnamedAddress;
 
         unsafe {
@@ -306,21 +323,19 @@ impl<'ctx> GlobalValue<'ctx> {
         }
     }
 
-    pub fn get_linkage(&self) -> Linkage {
-        let linkage = unsafe {
-            LLVMGetLinkage(self.as_value_ref())
-        };
-
-        Linkage::new(linkage)
-    }
-
-    pub fn set_linkage(&self, linkage: Linkage) {
+    pub fn get_linkage(self) -> Linkage {
         unsafe {
-            LLVMSetLinkage(self.as_value_ref(), linkage.as_llvm_enum())
+            LLVMGetLinkage(self.as_value_ref()).into()
         }
     }
 
-    pub fn print_to_string(&self) -> LLVMString {
+    pub fn set_linkage(self, linkage: Linkage) {
+        unsafe {
+            LLVMSetLinkage(self.as_value_ref(), linkage.into())
+        }
+    }
+
+    pub fn print_to_string(self) -> LLVMString {
         self.global_value.print_to_string()
     }
 }
