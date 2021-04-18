@@ -104,75 +104,39 @@ impl<'ctx> AnyValueEnum<'ctx> {
     }
 
     pub fn is_array_value(self) -> bool {
-        if let AnyValueEnum::ArrayValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AnyValueEnum::ArrayValue(_))
     }
 
     pub fn is_int_value(self) -> bool {
-        if let AnyValueEnum::IntValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AnyValueEnum::IntValue(_))
     }
 
     pub fn is_float_value(self) -> bool {
-        if let AnyValueEnum::FloatValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AnyValueEnum::FloatValue(_))
     }
 
     pub fn is_phi_value(self) -> bool {
-        if let AnyValueEnum::PhiValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AnyValueEnum::PhiValue(_))
     }
 
     pub fn is_function_value(self) -> bool {
-        if let AnyValueEnum::FunctionValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AnyValueEnum::FunctionValue(_))
     }
 
     pub fn is_pointer_value(self) -> bool {
-        if let AnyValueEnum::PointerValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AnyValueEnum::PointerValue(_))
     }
 
     pub fn is_struct_value(self) -> bool {
-        if let AnyValueEnum::StructValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AnyValueEnum::StructValue(_))
     }
 
     pub fn is_vector_value(self) -> bool {
-        if let AnyValueEnum::VectorValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AnyValueEnum::VectorValue(_))
     }
 
     pub fn is_instruction_value(self) -> bool {
-        if let AnyValueEnum::InstructionValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AnyValueEnum::InstructionValue(_))
     }
 
     pub fn into_array_value(self) -> ArrayValue<'ctx> {
@@ -279,51 +243,27 @@ impl<'ctx> BasicValueEnum<'ctx> {
     }
 
     pub fn is_array_value(self) -> bool {
-        if let BasicValueEnum::ArrayValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, BasicValueEnum::ArrayValue(_))
     }
 
     pub fn is_int_value(self) -> bool {
-        if let BasicValueEnum::IntValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, BasicValueEnum::IntValue(_))
     }
 
     pub fn is_float_value(self) -> bool {
-        if let BasicValueEnum::FloatValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, BasicValueEnum::FloatValue(_))
     }
 
     pub fn is_pointer_value(self) -> bool {
-        if let BasicValueEnum::PointerValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, BasicValueEnum::PointerValue(_))
     }
 
     pub fn is_struct_value(self) -> bool {
-        if let BasicValueEnum::StructValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, BasicValueEnum::StructValue(_))
     }
 
     pub fn is_vector_value(self) -> bool {
-        if let BasicValueEnum::VectorValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, BasicValueEnum::VectorValue(_))
     }
 
     pub fn into_array_value(self) -> ArrayValue<'ctx> {
@@ -389,19 +329,11 @@ impl<'ctx> AggregateValueEnum<'ctx> {
     }
 
     pub fn is_array_value(self) -> bool {
-        if let AggregateValueEnum::ArrayValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AggregateValueEnum::ArrayValue(_))
     }
 
     pub fn is_struct_value(self) -> bool {
-        if let AggregateValueEnum::StructValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AggregateValueEnum::StructValue(_))
     }
 
     pub fn into_array_value(self) -> ArrayValue<'ctx> {
@@ -445,59 +377,31 @@ impl<'ctx> BasicMetadataValueEnum<'ctx> {
     }
 
     pub fn is_array_value(self) -> bool {
-        if let BasicMetadataValueEnum::ArrayValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, BasicMetadataValueEnum::ArrayValue(_))
     }
 
     pub fn is_int_value(self) -> bool {
-        if let BasicMetadataValueEnum::IntValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, BasicMetadataValueEnum::IntValue(_))
     }
 
     pub fn is_float_value(self) -> bool {
-        if let BasicMetadataValueEnum::FloatValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, BasicMetadataValueEnum::FloatValue(_))
     }
 
     pub fn is_pointer_value(self) -> bool {
-        if let BasicMetadataValueEnum::PointerValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, BasicMetadataValueEnum::PointerValue(_))
     }
 
     pub fn is_struct_value(self) -> bool {
-        if let BasicMetadataValueEnum::StructValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, BasicMetadataValueEnum::StructValue(_))
     }
 
     pub fn is_vector_value(self) -> bool {
-        if let BasicMetadataValueEnum::VectorValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, BasicMetadataValueEnum::VectorValue(_))
     }
 
     pub fn is_metadata_value(self) -> bool {
-        if let BasicMetadataValueEnum::MetadataValue(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, BasicMetadataValueEnum::MetadataValue(_))
     }
 
     pub fn into_array_value(self) -> ArrayValue<'ctx> {
