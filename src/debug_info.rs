@@ -177,6 +177,10 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
         dwo_id: libc::c_uint,
         split_debug_inlining: bool,
         debug_info_for_profiling: bool,
+        #[cfg(feature = "llvm11-0")]
+        sysroot: &str,
+        #[cfg(feature = "llvm11-0")]
+        sdk: &str,
     ) -> (Self, DICompileUnit<'ctx>) {
         let builder = unsafe {
             if allow_unresolved {
@@ -205,6 +209,10 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
             dwo_id,
             split_debug_inlining,
             debug_info_for_profiling,
+            #[cfg(feature = "llvm11-0")]
+            sysroot,
+            #[cfg(feature = "llvm11-0")]
+            sdk
         );
 
         (builder, cu)
@@ -236,9 +244,16 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
         dwo_id: libc::c_uint,
         split_debug_inlining: bool,
         debug_info_for_profiling: bool,
+        #[cfg(feature = "llvm11-0")]
+        sysroot: &str,
+        #[cfg(feature = "llvm11-0")]
+        sdk: &str,
     ) -> DICompileUnit<'ctx> {
+
         let metadata_ref = unsafe {
-            LLVMDIBuilderCreateCompileUnit(
+            #[cfg(any(feature = "llvm3-6", feature = "llvm3-7", feature = "llvm3-8", feature = "llvm3-9",
+                  feature = "llvm4-0", feature = "llvm5-0", feature = "llvm6-0", feature = "llvm7-0", feature = "llvm8-0", feature= "llvm9-0", feature= "llvm10-0"))]
+            { LLVMDIBuilderCreateCompileUnit(
                 self.builder,
                 language.into(),
                 file.metadata_ref,
@@ -254,7 +269,30 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
                 dwo_id,
                 split_debug_inlining as _,
                 debug_info_for_profiling as _,
-            )
+            ) }
+
+            #[cfg(feature = "llvm11-0")]
+             { LLVMDIBuilderCreateCompileUnit(
+                self.builder,
+                language.into(),
+                file.metadata_ref,
+                producer.as_ptr() as _,
+                producer.len(),
+                is_optimized as _,
+                flags.as_ptr() as _,
+                flags.len(),
+                runtime_ver,
+                split_name.as_ptr() as _,
+                split_name.len(),
+                kind.into(),
+                dwo_id,
+                split_debug_inlining as _,
+                debug_info_for_profiling as _,
+                sysroot.as_ptr() as _,
+                sysroot.len(),
+                sdk.as_ptr() as _,
+                sdk.len(),
+            )}
         };
 
         DICompileUnit {

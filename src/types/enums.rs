@@ -4,7 +4,7 @@ use llvm_sys::prelude::LLVMTypeRef;
 
 use crate::types::{IntType, VoidType, FunctionType, PointerType, VectorType, ArrayType, StructType, FloatType};
 use crate::types::traits::AsTypeRef;
-use crate::values::IntValue;
+use crate::values::{BasicValue, BasicValueEnum, IntValue};
 
 use std::convert::TryFrom;
 
@@ -78,7 +78,7 @@ enum_type_set! {
         ArrayType,
         /// A floating point type.
         FloatType,
-        // An integer type.
+        /// An integer type.
         IntType,
         /// A pointer type.
         PointerType,
@@ -103,6 +103,8 @@ impl<'ctx> AnyTypeEnum<'ctx> {
             LLVMTypeKind::LLVMX86_FP80TypeKind |
             LLVMTypeKind::LLVMFP128TypeKind |
             LLVMTypeKind::LLVMPPC_FP128TypeKind => AnyTypeEnum::FloatType(FloatType::new(type_)),
+            #[cfg(feature = "llvm11-0")]
+            LLVMTypeKind::LLVMBFloatTypeKind => AnyTypeEnum::FloatType(FloatType::new(type_)),
             LLVMTypeKind::LLVMLabelTypeKind => panic!("FIXME: Unsupported type: Label"),
             LLVMTypeKind::LLVMIntegerTypeKind => AnyTypeEnum::IntType(IntType::new(type_)),
             LLVMTypeKind::LLVMFunctionTypeKind => AnyTypeEnum::FunctionType(FunctionType::new(type_)),
@@ -110,6 +112,8 @@ impl<'ctx> AnyTypeEnum<'ctx> {
             LLVMTypeKind::LLVMArrayTypeKind => AnyTypeEnum::ArrayType(ArrayType::new(type_)),
             LLVMTypeKind::LLVMPointerTypeKind => AnyTypeEnum::PointerType(PointerType::new(type_)),
             LLVMTypeKind::LLVMVectorTypeKind => AnyTypeEnum::VectorType(VectorType::new(type_)),
+            #[cfg(feature = "llvm11-0")]
+            LLVMTypeKind::LLVMScalableVectorTypeKind => AnyTypeEnum::VectorType(VectorType::new(type_)),
             LLVMTypeKind::LLVMMetadataTypeKind => panic!("FIXME: Unsupported type: Metadata"),
             LLVMTypeKind::LLVMX86_MMXTypeKind => panic!("FIXME: Unsupported type: MMX"),
             #[cfg(not(any(feature = "llvm3-6", feature = "llvm3-7")))]
@@ -187,67 +191,35 @@ impl<'ctx> AnyTypeEnum<'ctx> {
     }
 
     pub fn is_array_type(self) -> bool {
-        if let AnyTypeEnum::ArrayType(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AnyTypeEnum::ArrayType(_))
     }
 
     pub fn is_float_type(self) -> bool {
-        if let AnyTypeEnum::FloatType(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AnyTypeEnum::FloatType(_))
     }
 
     pub fn is_function_type(self) -> bool {
-        if let AnyTypeEnum::FunctionType(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AnyTypeEnum::FunctionType(_))
     }
 
     pub fn is_int_type(self) -> bool {
-        if let AnyTypeEnum::IntType(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AnyTypeEnum::IntType(_))
     }
 
     pub fn is_pointer_type(self) -> bool {
-        if let AnyTypeEnum::PointerType(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AnyTypeEnum::PointerType(_))
     }
 
     pub fn is_struct_type(self) -> bool {
-        if let AnyTypeEnum::StructType(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AnyTypeEnum::StructType(_))
     }
 
     pub fn is_vector_type(self) -> bool {
-        if let AnyTypeEnum::VectorType(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AnyTypeEnum::VectorType(_))
     }
 
     pub fn is_void_type(self) -> bool {
-        if let AnyTypeEnum::VoidType(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AnyTypeEnum::VoidType(_))
     }
 
     pub fn size_of(&self) -> Option<IntValue<'ctx>> {
@@ -277,11 +249,15 @@ impl<'ctx> BasicTypeEnum<'ctx> {
             LLVMTypeKind::LLVMX86_FP80TypeKind |
             LLVMTypeKind::LLVMFP128TypeKind |
             LLVMTypeKind::LLVMPPC_FP128TypeKind => BasicTypeEnum::FloatType(FloatType::new(type_)),
+            #[cfg(feature= "llvm11-0")]
+            LLVMTypeKind::LLVMBFloatTypeKind => BasicTypeEnum::FloatType(FloatType::new(type_)),
             LLVMTypeKind::LLVMIntegerTypeKind => BasicTypeEnum::IntType(IntType::new(type_)),
             LLVMTypeKind::LLVMStructTypeKind => BasicTypeEnum::StructType(StructType::new(type_)),
             LLVMTypeKind::LLVMPointerTypeKind => BasicTypeEnum::PointerType(PointerType::new(type_)),
             LLVMTypeKind::LLVMArrayTypeKind => BasicTypeEnum::ArrayType(ArrayType::new(type_)),
             LLVMTypeKind::LLVMVectorTypeKind => BasicTypeEnum::VectorType(VectorType::new(type_)),
+            #[cfg(feature= "llvm11-0")]
+            LLVMTypeKind::LLVMScalableVectorTypeKind => BasicTypeEnum::VectorType(VectorType::new(type_)),
             LLVMTypeKind::LLVMMetadataTypeKind => unreachable!("Unsupported basic type: Metadata"),
             LLVMTypeKind::LLVMX86_MMXTypeKind => unreachable!("Unsupported basic type: MMX"),
             LLVMTypeKind::LLVMLabelTypeKind => unreachable!("Unsupported basic type: Label"),
@@ -341,50 +317,48 @@ impl<'ctx> BasicTypeEnum<'ctx> {
     }
 
     pub fn is_array_type(self) -> bool {
-        if let BasicTypeEnum::ArrayType(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, BasicTypeEnum::ArrayType(_))
     }
 
     pub fn is_float_type(self) -> bool {
-        if let BasicTypeEnum::FloatType(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, BasicTypeEnum::FloatType(_))
     }
 
     pub fn is_int_type(self) -> bool {
-        if let BasicTypeEnum::IntType(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, BasicTypeEnum::IntType(_))
     }
 
     pub fn is_pointer_type(self) -> bool {
-        if let BasicTypeEnum::PointerType(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, BasicTypeEnum::PointerType(_))
     }
 
     pub fn is_struct_type(self) -> bool {
-        if let BasicTypeEnum::StructType(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, BasicTypeEnum::StructType(_))
     }
 
     pub fn is_vector_type(self) -> bool {
-        if let BasicTypeEnum::VectorType(_) = self {
-            true
-        } else {
-            false
+        matches!(self, BasicTypeEnum::VectorType(_))
+    }
+
+    /// Creates a constant `BasicValueZero`.
+    ///
+    /// # Example
+    /// ```
+    /// use inkwell::context::Context;
+    /// use crate::inkwell::types::BasicType;
+    ///
+    /// let context = Context::create();
+    /// let f32_type = context.f32_type().as_basic_type_enum();
+    /// let f32_zero = f32_type.const_zero();
+    /// ```
+    pub fn const_zero(self) -> BasicValueEnum<'ctx> {
+        match self {
+            BasicTypeEnum::ArrayType(ty) => ty.const_zero().as_basic_value_enum(),
+            BasicTypeEnum::FloatType(ty) => ty.const_zero().as_basic_value_enum(),
+            BasicTypeEnum::IntType(ty) => ty.const_zero().as_basic_value_enum(),
+            BasicTypeEnum::PointerType(ty) => ty.const_zero().as_basic_value_enum(),
+            BasicTypeEnum::StructType(ty) => ty.const_zero().as_basic_value_enum(),
+            BasicTypeEnum::VectorType(ty) => ty.const_zero().as_basic_value_enum(),
         }
     }
 }
