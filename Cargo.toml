@@ -12,7 +12,7 @@ categories = ["development-tools::ffi"]
 edition = "2018"
 
 [features]
-default = ["target-all", "llvm10-0"]
+default = ["target-all"]
 # Please update internal_macros::FEATURE_VERSIONS when adding a new LLVM version
 llvm3-6 = ["llvm-sys-36"]
 llvm3-7 = ["llvm-sys-37"]
