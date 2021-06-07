@@ -28,7 +28,7 @@ pub struct Builder<'ctx> {
 }
 
 impl<'ctx> Builder<'ctx> {
-    pub(crate) fn new(builder: LLVMBuilderRef) -> Self {
+    pub(crate) unsafe fn new(builder: LLVMBuilderRef) -> Self {
         debug_assert!(!builder.is_null());
 
         Builder {
@@ -66,7 +66,9 @@ impl<'ctx> Builder<'ctx> {
             value.map_or_else(|| LLVMBuildRetVoid(self.builder), |value| LLVMBuildRet(self.builder, value.as_value_ref()))
         };
 
-        InstructionValue::new(value)
+        unsafe {
+            InstructionValue::new(value)
+        }
     }
 
     /// Builds a function return instruction for a return type which is an aggregate type (ie structs and arrays).
@@ -100,7 +102,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildAggregateRet(self.builder, args.as_mut_ptr(), args.len() as u32)
         };
 
-        InstructionValue::new(value)
+        unsafe {
+            InstructionValue::new(value)
+        }
     }
 
     /// Builds a function call instruction. It can take either a `FunctionValue` or a `PointerValue`
@@ -169,7 +173,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildCall(self.builder, fn_val_ref, args.as_mut_ptr(), args.len() as u32, c_string.as_ptr())
         };
 
-        CallSiteValue::new(value)
+        unsafe {
+            CallSiteValue::new(value)
+        }
     }
 
     pub fn build_invoke<F>(
@@ -374,7 +380,9 @@ impl<'ctx> Builder<'ctx> {
         let c_string = to_c_str(name);
         let value = unsafe { LLVMBuildStructGEP(self.builder, ptr.as_value_ref(), index, c_string.as_ptr()) };
 
-        Ok(PointerValue::new(value))
+        unsafe {
+            Ok(PointerValue::new(value))
+        }
     }
 
     /// Builds an instruction which calculates the difference of two pointers.
@@ -404,12 +412,13 @@ impl<'ctx> Builder<'ctx> {
     /// ```
     pub fn build_ptr_diff(&self, lhs_ptr: PointerValue<'ctx>, rhs_ptr: PointerValue<'ctx>, name: &str) -> IntValue<'ctx> {
         let c_string = to_c_str(name);
-
         let value = unsafe {
             LLVMBuildPtrDiff(self.builder, lhs_ptr.as_value_ref(), rhs_ptr.as_value_ref(), c_string.as_ptr())
         };
 
-        IntValue::new(value)
+        unsafe {
+            IntValue::new(value)
+        }
     }
 
     // SubTypes: Maybe this should return PhiValue<T>? That way we could force incoming values to be of T::Value?
@@ -419,12 +428,13 @@ impl<'ctx> Builder<'ctx> {
     // REVIEW: Not sure if we can enforce the above somehow via types.
     pub fn build_phi<T: BasicType<'ctx>>(&self, type_: T, name: &str) -> PhiValue<'ctx> {
         let c_string = to_c_str(name);
-
         let value = unsafe {
             LLVMBuildPhi(self.builder, type_.as_type_ref(), c_string.as_ptr())
         };
 
-        PhiValue::new(value)
+        unsafe {
+            PhiValue::new(value)
+        }
     }
 
     /// Builds a store instruction. It allows you to store a value of type `T` in a pointer to a type `T`.
@@ -457,7 +467,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildStore(self.builder, value.as_value_ref(), ptr.as_value_ref())
         };
 
-        InstructionValue::new(value)
+        unsafe {
+            InstructionValue::new(value)
+        }
     }
 
     /// Builds a load instruction. It allows you to retrieve a value of type `T` from a pointer to a type `T`.
@@ -487,34 +499,37 @@ impl<'ctx> Builder<'ctx> {
     /// ```
     pub fn build_load(&self, ptr: PointerValue<'ctx>, name: &str) -> BasicValueEnum<'ctx> {
         let c_string = to_c_str(name);
-
         let value = unsafe {
             LLVMBuildLoad(self.builder, ptr.as_value_ref(), c_string.as_ptr())
         };
 
-        BasicValueEnum::new(value)
+        unsafe {
+            BasicValueEnum::new(value)
+        }
     }
 
     // TODOC: Stack allocation
     pub fn build_alloca<T: BasicType<'ctx>>(&self, ty: T, name: &str) -> PointerValue<'ctx> {
         let c_string = to_c_str(name);
-
         let value = unsafe {
             LLVMBuildAlloca(self.builder, ty.as_type_ref(), c_string.as_ptr())
         };
 
-        PointerValue::new(value)
+        unsafe {
+            PointerValue::new(value)
+        }
     }
 
     // TODOC: Stack allocation
     pub fn build_array_alloca<T: BasicType<'ctx>>(&self, ty: T, size: IntValue<'ctx>, name: &str) -> PointerValue<'ctx> {
         let c_string = to_c_str(name);
-
         let value = unsafe {
             LLVMBuildArrayAlloca(self.builder, ty.as_type_ref(), size.as_value_ref(), c_string.as_ptr())
         };
 
-        PointerValue::new(value)
+        unsafe {
+            PointerValue::new(value)
+        }
     }
 
     /// Build a [memcpy](https://llvm.org/docs/LangRef.html#llvm-memcpy-intrinsic) instruction.
@@ -553,7 +568,9 @@ impl<'ctx> Builder<'ctx> {
             )
         };
 
-        Ok(PointerValue::new(value))
+        unsafe {
+            Ok(PointerValue::new(value))
+        }
     }
 
     /// Build a [memmove](http://llvm.org/docs/LangRef.html#llvm-memmove-intrinsic) instruction.
@@ -592,7 +609,9 @@ impl<'ctx> Builder<'ctx> {
             )
         };
 
-        Ok(PointerValue::new(value))
+        unsafe {
+            Ok(PointerValue::new(value))
+        }
     }
 
     // TODOC: Heap allocation
@@ -608,7 +627,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildMalloc(self.builder, ty.as_type_ref(), c_string.as_ptr())
         };
 
-        Ok(PointerValue::new(value))
+        unsafe {
+            Ok(PointerValue::new(value))
+        }
     }
 
     // TODOC: Heap allocation
@@ -629,16 +650,16 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildArrayMalloc(self.builder, ty.as_type_ref(), size.as_value_ref(), c_string.as_ptr())
         };
 
-        Ok(PointerValue::new(value))
+        unsafe {
+            Ok(PointerValue::new(value))
+        }
     }
 
     // SubType: <P>(&self, ptr: PointerValue<P>) -> InstructionValue {
     pub fn build_free(&self, ptr: PointerValue<'ctx>) -> InstructionValue<'ctx> {
-        let val = unsafe {
-            LLVMBuildFree(self.builder, ptr.as_value_ref())
-        };
-
-        InstructionValue::new(val)
+        unsafe {
+            InstructionValue::new(LLVMBuildFree(self.builder, ptr.as_value_ref()))
+        }
     }
 
     pub fn insert_instruction(&self, instruction: &InstructionValue<'ctx>, name: Option<&str>) {
@@ -657,11 +678,9 @@ impl<'ctx> Builder<'ctx> {
     }
 
     pub fn get_insert_block(&self) -> Option<BasicBlock<'ctx>> {
-        let bb = unsafe {
-            LLVMGetInsertBlock(self.builder)
-        };
-
-        BasicBlock::new(bb)
+        unsafe {
+            BasicBlock::new(LLVMGetInsertBlock(self.builder))
+        }
     }
 
     // TODO: Possibly make this generic over sign via struct metadata or subtypes
@@ -744,12 +763,13 @@ impl<'ctx> Builder<'ctx> {
         name: &str,
     ) -> PointerValue<'ctx> {
         let c_string = to_c_str(name);
-
         let value = unsafe {
             LLVMBuildAddrSpaceCast(self.builder, ptr_val.as_value_ref(), ptr_type.as_type_ref(), c_string.as_ptr())
         };
 
-        PointerValue::new(value)
+        unsafe {
+            PointerValue::new(value)
+        }
     }
 
     /// Builds a bitcast instruction. A bitcast reinterprets the bits of one value
@@ -785,12 +805,13 @@ impl<'ctx> Builder<'ctx> {
         V: BasicValue<'ctx>,
     {
         let c_string = to_c_str(name);
-
         let value = unsafe {
             LLVMBuildBitCast(self.builder, val.as_value_ref(), ty.as_type_ref(), c_string.as_ptr())
         };
 
-        BasicValueEnum::new(value)
+        unsafe {
+            BasicValueEnum::new(value)
+        }
     }
 
     pub fn build_int_s_extend_or_bit_cast<T: IntMathValue<'ctx>>(&self, int_value: T, int_type: T::BaseType, name: &str) -> T {
@@ -1275,12 +1296,13 @@ impl<'ctx> Builder<'ctx> {
         name: &str,
     ) -> BasicValueEnum<'ctx> {
         let c_string = to_c_str(name);
-
         let value = unsafe {
             LLVMBuildCast(self.builder, op.into(), from_value.as_value_ref(), to_type.as_type_ref(), c_string.as_ptr())
         };
 
-        BasicValueEnum::new(value)
+        unsafe {
+            BasicValueEnum::new(value)
+        }
     }
 
     // SubType: <F, T>(&self, from: &PointerValue<F>, to: &PointerType<T>, name: &str) -> PointerValue<T> {
@@ -1331,7 +1353,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildBr(self.builder, destination_block.basic_block)
         };
 
-        InstructionValue::new(value)
+        unsafe {
+            InstructionValue::new(value)
+        }
     }
 
     pub fn build_conditional_branch(
@@ -1344,7 +1368,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildCondBr(self.builder, comparison.as_value_ref(), then_block.basic_block, else_block.basic_block)
         };
 
-        InstructionValue::new(value)
+        unsafe {
+            InstructionValue::new(value)
+        }
     }
 
     pub fn build_indirect_branch<BV: BasicValue<'ctx>>(
@@ -1362,7 +1388,9 @@ impl<'ctx> Builder<'ctx> {
             }
         }
 
-        InstructionValue::new(value)
+        unsafe {
+            InstructionValue::new(value)
+        }
     }
 
     // SubType: <I>(&self, value: &IntValue<I>, name) -> IntValue<I> {
@@ -1500,7 +1528,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildExtractValue(self.builder, agg.as_value_ref(), index, c_string.as_ptr())
         };
 
-        Some(BasicValueEnum::new(value))
+        unsafe {
+            Some(BasicValueEnum::new(value))
+        }
     }
 
     /// Builds an insert value instruction which inserts a `BasicValue` into a struct
@@ -1556,7 +1586,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildInsertValue(self.builder, agg.as_value_ref(), value.as_value_ref(), index, c_string.as_ptr())
         };
 
-        Some(AggregateValueEnum::new(value))
+        unsafe {
+            Some(AggregateValueEnum::new(value))
+        }
     }
 
     /// Builds an extract element instruction which extracts a `BasicValueEnum`
@@ -1590,7 +1622,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildExtractElement(self.builder, vector.as_value_ref(), index.as_value_ref(), c_string.as_ptr())
         };
 
-        BasicValueEnum::new(value)
+        unsafe {
+            BasicValueEnum::new(value)
+        }
     }
 
     /// Builds an insert element instruction which inserts a `BasicValue` into a vector
@@ -1631,7 +1665,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildInsertElement(self.builder, vector.as_value_ref(), element.as_value_ref(), index.as_value_ref(), c_string.as_ptr())
         };
 
-        VectorValue::new(value)
+        unsafe {
+            VectorValue::new(value)
+        }
     }
 
     pub fn build_unreachable(&self) -> InstructionValue<'ctx> {
@@ -1639,7 +1675,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildUnreachable(self.builder)
         };
 
-        InstructionValue::new(val)
+        unsafe {
+            InstructionValue::new(val)
+        }
     }
 
     // REVIEW: Not sure if this should return InstructionValue or an actual value
@@ -1651,7 +1689,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildFence(self.builder, atomic_ordering.into(), num, c_string.as_ptr())
         };
 
-        InstructionValue::new(val)
+        unsafe {
+            InstructionValue::new(val)
+        }
     }
 
     // SubType: <P>(&self, ptr: &PointerValue<P>, name) -> IntValue<bool> {
@@ -1723,7 +1763,9 @@ impl<'ctx> Builder<'ctx> {
             }
         }
 
-        InstructionValue::new(switch_value)
+        unsafe {
+            InstructionValue::new(switch_value)
+        }
     }
 
     // SubTypes: condition can only be IntValue<bool> or VectorValue<IntValue<Bool>>
@@ -1733,7 +1775,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildSelect(self.builder, condition.as_value_ref(), then.as_value_ref(), else_.as_value_ref(), c_string.as_ptr())
         };
 
-        BasicValueEnum::new(value)
+        unsafe {
+            BasicValueEnum::new(value)
+        }
     }
 
     // The unsafety of this function should be fixable with subtypes. See GH #32
@@ -1754,7 +1798,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildGlobalStringPtr(self.builder, c_string_value.as_ptr(), c_string_name.as_ptr())
         };
 
-        GlobalValue::new(value)
+        unsafe {
+            GlobalValue::new(value)
+        }
     }
 
     // REVIEW: Do we need to constrain types here? subtypes?
@@ -1764,7 +1810,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildShuffleVector(self.builder, left.as_value_ref(), right.as_value_ref(), mask.as_value_ref(), c_string.as_ptr())
         };
 
-        VectorValue::new(value)
+        unsafe {
+            VectorValue::new(value)
+        }
     }
 
     // REVIEW: Is return type correct?
@@ -1777,7 +1825,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildVAArg(self.builder, list.as_value_ref(), type_.as_type_ref(), c_string.as_ptr())
         };
 
-        BasicValueEnum::new(value)
+        unsafe {
+            BasicValueEnum::new(value)
+        }
     }
 
     /// Builds an atomicrmw instruction. It allows you to atomically modify memory.
@@ -1825,7 +1875,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildAtomicRMW(self.builder, op.into(), ptr.as_value_ref(), value.as_value_ref(), ordering.into(), false as i32)
         };
 
-        Ok(IntValue::new(val))
+        unsafe {
+            Ok(IntValue::new(val))
+        }
     }
 
     /// Builds a cmpxchg instruction. It allows you to atomically compare and replace memory.
@@ -1888,7 +1940,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMBuildAtomicCmpXchg(self.builder, ptr.as_value_ref(), cmp.as_value_ref(), new.as_value_ref(), success.into(), failure.into(), false as i32)
         };
 
-        Ok(StructValue::new(val))
+        unsafe {
+            Ok(StructValue::new(val))
+        }
     }
 
     /// Set the debug info source location of the instruction currently pointed at by the builder

@@ -36,6 +36,8 @@ pub const FIRST_CUSTOM_METADATA_KIND_ID: u32 = 26;
 pub const FIRST_CUSTOM_METADATA_KIND_ID: u32 = 28;
 #[cfg(any(feature = "llvm10-0", feature = "llvm11-0"))]
 pub const FIRST_CUSTOM_METADATA_KIND_ID: u32 = 30;
+#[cfg(feature = "llvm12-0")]
+pub const FIRST_CUSTOM_METADATA_KIND_ID: u32 = 31;
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash)]
 pub struct MetadataValue<'ctx> {
@@ -43,12 +45,9 @@ pub struct MetadataValue<'ctx> {
 }
 
 impl<'ctx> MetadataValue<'ctx> {
-    pub(crate) fn new(value: LLVMValueRef) -> Self {
+    pub(crate) unsafe fn new(value: LLVMValueRef) -> Self {
         assert!(!value.is_null());
-
-        unsafe {
-            assert!(!LLVMIsAMDNode(value).is_null() || !LLVMIsAMDString(value).is_null());
-        }
+        assert!(!LLVMIsAMDNode(value).is_null() || !LLVMIsAMDString(value).is_null());
 
         MetadataValue {
             metadata_value: Value::new(value),
@@ -118,7 +117,7 @@ impl<'ctx> MetadataValue<'ctx> {
         };
 
         vec.iter()
-            .map(|val| BasicMetadataValueEnum::new(*val))
+            .map(|val| unsafe { BasicMetadataValueEnum::new(*val) })
             .collect()
     }
 

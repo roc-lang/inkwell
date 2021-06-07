@@ -66,12 +66,8 @@ enum_value_set! {BasicValueEnum: ArrayValue, IntValue, FloatValue, PointerValue,
 enum_value_set! {BasicMetadataValueEnum: ArrayValue, IntValue, FloatValue, PointerValue, StructValue, VectorValue, MetadataValue}
 
 impl<'ctx> AnyValueEnum<'ctx> {
-    pub(crate) fn new(value: LLVMValueRef) -> Self {
-        let type_kind = unsafe {
-            LLVMGetTypeKind(LLVMTypeOf(value))
-        };
-
-        match type_kind {
+    pub(crate) unsafe fn new(value: LLVMValueRef) -> Self {
+        match LLVMGetTypeKind(LLVMTypeOf(value)) {
             LLVMTypeKind::LLVMFloatTypeKind |
             LLVMTypeKind::LLVMFP128TypeKind |
             LLVMTypeKind::LLVMDoubleTypeKind |
@@ -85,7 +81,7 @@ impl<'ctx> AnyValueEnum<'ctx> {
             LLVMTypeKind::LLVMVectorTypeKind => AnyValueEnum::VectorValue(VectorValue::new(value)),
             LLVMTypeKind::LLVMFunctionTypeKind => AnyValueEnum::FunctionValue(FunctionValue::new(value).unwrap()),
             LLVMTypeKind::LLVMVoidTypeKind => {
-                if unsafe { LLVMIsAInstruction(value) }.is_null() {
+                if LLVMIsAInstruction(value).is_null() {
                     panic!("Void value isn't an instruction.");
                 }
                 AnyValueEnum::InstructionValue(InstructionValue::new(value))
@@ -96,11 +92,9 @@ impl<'ctx> AnyValueEnum<'ctx> {
     }
 
     pub fn get_type(&self) -> AnyTypeEnum<'ctx> {
-        let type_ = unsafe {
-            LLVMTypeOf(self.as_value_ref())
-        };
-
-        AnyTypeEnum::new(type_)
+        unsafe {
+            AnyTypeEnum::new(LLVMTypeOf(self.as_value_ref()))
+        }
     }
 
     pub fn is_array_value(self) -> bool {
@@ -143,7 +137,7 @@ impl<'ctx> AnyValueEnum<'ctx> {
         if let AnyValueEnum::ArrayValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the ArrayValue variant", self)
         }
     }
 
@@ -151,7 +145,7 @@ impl<'ctx> AnyValueEnum<'ctx> {
         if let AnyValueEnum::IntValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the IntValue variant", self)
         }
     }
 
@@ -159,7 +153,7 @@ impl<'ctx> AnyValueEnum<'ctx> {
         if let AnyValueEnum::FloatValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the FloatValue variant", self)
         }
     }
 
@@ -167,7 +161,7 @@ impl<'ctx> AnyValueEnum<'ctx> {
         if let AnyValueEnum::PhiValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the PhiValue variant", self)
         }
     }
 
@@ -175,7 +169,7 @@ impl<'ctx> AnyValueEnum<'ctx> {
         if let AnyValueEnum::FunctionValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the FunctionValue variant", self)
         }
     }
 
@@ -183,7 +177,7 @@ impl<'ctx> AnyValueEnum<'ctx> {
         if let AnyValueEnum::PointerValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the PointerValue variant", self)
         }
     }
 
@@ -191,7 +185,7 @@ impl<'ctx> AnyValueEnum<'ctx> {
         if let AnyValueEnum::StructValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the StructValue variant", self)
         }
     }
 
@@ -199,7 +193,7 @@ impl<'ctx> AnyValueEnum<'ctx> {
         if let AnyValueEnum::VectorValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the VectorValue variant", self)
         }
     }
 
@@ -207,18 +201,14 @@ impl<'ctx> AnyValueEnum<'ctx> {
         if let AnyValueEnum::InstructionValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the InstructionValue variant", self)
         }
     }
 }
 
 impl<'ctx> BasicValueEnum<'ctx> {
-    pub(crate) fn new(value: LLVMValueRef) -> Self {
-        let type_kind = unsafe {
-            LLVMGetTypeKind(LLVMTypeOf(value))
-        };
-
-        match type_kind {
+    pub(crate) unsafe fn new(value: LLVMValueRef) -> Self {
+        match LLVMGetTypeKind(LLVMTypeOf(value)) {
             LLVMTypeKind::LLVMFloatTypeKind |
             LLVMTypeKind::LLVMFP128TypeKind |
             LLVMTypeKind::LLVMDoubleTypeKind |
@@ -235,11 +225,9 @@ impl<'ctx> BasicValueEnum<'ctx> {
     }
 
     pub fn get_type(&self) -> BasicTypeEnum<'ctx> {
-        let type_ = unsafe {
-            LLVMTypeOf(self.as_value_ref())
-        };
-
-        BasicTypeEnum::new(type_)
+        unsafe {
+            BasicTypeEnum::new(LLVMTypeOf(self.as_value_ref()))
+        }
     }
 
     pub fn is_array_value(self) -> bool {
@@ -270,7 +258,7 @@ impl<'ctx> BasicValueEnum<'ctx> {
         if let BasicValueEnum::ArrayValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the ArrayValue variant", self)
         }
     }
 
@@ -278,7 +266,7 @@ impl<'ctx> BasicValueEnum<'ctx> {
         if let BasicValueEnum::IntValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the IntValue variant", self)
         }
     }
 
@@ -286,7 +274,7 @@ impl<'ctx> BasicValueEnum<'ctx> {
         if let BasicValueEnum::FloatValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the FloatValue variant", self)
         }
     }
 
@@ -294,7 +282,7 @@ impl<'ctx> BasicValueEnum<'ctx> {
         if let BasicValueEnum::PointerValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected PointerValue variant", self)
         }
     }
 
@@ -302,7 +290,7 @@ impl<'ctx> BasicValueEnum<'ctx> {
         if let BasicValueEnum::StructValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the StructValue variant", self)
         }
     }
 
@@ -310,18 +298,14 @@ impl<'ctx> BasicValueEnum<'ctx> {
         if let BasicValueEnum::VectorValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the VectorValue variant", self)
         }
     }
 }
 
 impl<'ctx> AggregateValueEnum<'ctx> {
-    pub(crate) fn new(value: LLVMValueRef) -> Self {
-        let type_kind = unsafe {
-            LLVMGetTypeKind(LLVMTypeOf(value))
-        };
-
-        match type_kind {
+    pub(crate) unsafe fn new(value: LLVMValueRef) -> Self {
+        match LLVMGetTypeKind(LLVMTypeOf(value)) {
             LLVMTypeKind::LLVMArrayTypeKind => AggregateValueEnum::ArrayValue(ArrayValue::new(value)),
             LLVMTypeKind::LLVMStructTypeKind => AggregateValueEnum::StructValue(StructValue::new(value)),
             _ => unreachable!("The given type is not an aggregate type."),
@@ -340,7 +324,7 @@ impl<'ctx> AggregateValueEnum<'ctx> {
         if let AggregateValueEnum::ArrayValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the ArrayValue variant", self)
         }
     }
 
@@ -348,18 +332,14 @@ impl<'ctx> AggregateValueEnum<'ctx> {
         if let AggregateValueEnum::StructValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the StructValue variant", self)
         }
     }
 }
 
 impl<'ctx> BasicMetadataValueEnum<'ctx> {
-    pub(crate) fn new(value: LLVMValueRef) -> Self {
-        let type_kind = unsafe {
-            LLVMGetTypeKind(LLVMTypeOf(value))
-        };
-
-        match type_kind {
+    pub(crate) unsafe fn new(value: LLVMValueRef) -> Self {
+        match LLVMGetTypeKind(LLVMTypeOf(value)) {
             LLVMTypeKind::LLVMFloatTypeKind |
             LLVMTypeKind::LLVMFP128TypeKind |
             LLVMTypeKind::LLVMDoubleTypeKind |
@@ -408,7 +388,7 @@ impl<'ctx> BasicMetadataValueEnum<'ctx> {
         if let BasicMetadataValueEnum::ArrayValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the ArrayValue variant", self)
         }
     }
 
@@ -416,7 +396,7 @@ impl<'ctx> BasicMetadataValueEnum<'ctx> {
         if let BasicMetadataValueEnum::IntValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the IntValue variant", self)
         }
     }
 
@@ -424,7 +404,7 @@ impl<'ctx> BasicMetadataValueEnum<'ctx> {
         if let BasicMetadataValueEnum::FloatValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected FloatValue variant", self)
         }
     }
 
@@ -432,7 +412,7 @@ impl<'ctx> BasicMetadataValueEnum<'ctx> {
         if let BasicMetadataValueEnum::PointerValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the PointerValue variant", self)
         }
     }
 
@@ -440,7 +420,7 @@ impl<'ctx> BasicMetadataValueEnum<'ctx> {
         if let BasicMetadataValueEnum::StructValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the StructValue variant", self)
         }
     }
 
@@ -448,7 +428,7 @@ impl<'ctx> BasicMetadataValueEnum<'ctx> {
         if let BasicMetadataValueEnum::VectorValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected the VectorValue variant", self)
         }
     }
 
@@ -456,14 +436,16 @@ impl<'ctx> BasicMetadataValueEnum<'ctx> {
         if let BasicMetadataValueEnum::MetadataValue(v) = self {
             v
         } else {
-            panic!("Found {:?} but expected a different variant", self)
+            panic!("Found {:?} but expected MetaData variant", self)
         }
     }
 }
 
 impl<'ctx> From<BasicValueEnum<'ctx>> for AnyValueEnum<'ctx> {
     fn from(value: BasicValueEnum<'ctx>) -> Self {
-        AnyValueEnum::new(value.as_value_ref())
+        unsafe {
+            AnyValueEnum::new(value.as_value_ref())
+        }
     }
 }
 

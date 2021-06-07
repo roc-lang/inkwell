@@ -177,9 +177,9 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
         dwo_id: libc::c_uint,
         split_debug_inlining: bool,
         debug_info_for_profiling: bool,
-        #[cfg(feature = "llvm11-0")]
+        #[cfg(any(feature = "llvm11-0", feature = "llvm12-0"))]
         sysroot: &str,
-        #[cfg(feature = "llvm11-0")]
+        #[cfg(any(feature = "llvm11-0", feature = "llvm12-0"))]
         sdk: &str,
     ) -> (Self, DICompileUnit<'ctx>) {
         let builder = unsafe {
@@ -209,9 +209,9 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
             dwo_id,
             split_debug_inlining,
             debug_info_for_profiling,
-            #[cfg(feature = "llvm11-0")]
+            #[cfg(any(feature = "llvm11-0", feature = "llvm12-0"))]
             sysroot,
-            #[cfg(feature = "llvm11-0")]
+            #[cfg(any(feature = "llvm11-0", feature = "llvm12-0"))]
             sdk
         );
 
@@ -244,9 +244,9 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
         dwo_id: libc::c_uint,
         split_debug_inlining: bool,
         debug_info_for_profiling: bool,
-        #[cfg(feature = "llvm11-0")]
+        #[cfg(any(feature = "llvm11-0", feature = "llvm12-0"))]
         sysroot: &str,
-        #[cfg(feature = "llvm11-0")]
+        #[cfg(any(feature = "llvm11-0", feature = "llvm12-0"))]
         sdk: &str,
     ) -> DICompileUnit<'ctx> {
 
@@ -271,7 +271,7 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
                 debug_info_for_profiling as _,
             ) }
 
-            #[cfg(feature = "llvm11-0")]
+            #[cfg(any(feature = "llvm11-0", feature = "llvm12-0"))]
              { LLVMDIBuilderCreateCompileUnit(
                 self.builder,
                 language.into(),
@@ -800,7 +800,10 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
                 instruction.as_value_ref(),
             )
         };
-        InstructionValue::new(value_ref)
+
+        unsafe {
+            InstructionValue::new(value_ref)
+        }
     }
 
     /// Insert a variable declaration (`llvm.dbg.declare` intrinsic) at the end of `block`
@@ -824,7 +827,10 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
                 block.basic_block,
             )
         };
-        InstructionValue::new(value_ref)
+
+        unsafe {
+            InstructionValue::new(value_ref)
+        }
     }
 
     /// Create an expression
@@ -861,7 +867,10 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
                 instruction.as_value_ref(),
             )
         };
-        InstructionValue::new(value_ref)
+
+        unsafe {
+            InstructionValue::new(value_ref)
+        }
     }
 
     /// Construct a placeholders derived type to be used when building debug info with circular references.
@@ -1148,10 +1157,9 @@ pub struct DIGlobalVariableExpression<'ctx> {
 
 impl <'ctx> DIGlobalVariableExpression<'ctx>  {
     pub fn as_metadata_value(&self, context: &Context) -> MetadataValue<'ctx> {
-        let value = unsafe {
-            LLVMMetadataAsValue(context.context, self.metadata_ref)
-        };
-        MetadataValue::new(value)
+        unsafe {
+            MetadataValue::new(LLVMMetadataAsValue(context.context, self.metadata_ref))
+        }
     }
 }
 

@@ -90,12 +90,8 @@ enum_type_set! {
 }
 
 impl<'ctx> AnyTypeEnum<'ctx> {
-    pub(crate) fn new(type_: LLVMTypeRef) -> Self {
-        let type_kind = unsafe {
-            LLVMGetTypeKind(type_)
-        };
-
-        match type_kind {
+    pub(crate) unsafe fn new(type_: LLVMTypeRef) -> Self {
+        match LLVMGetTypeKind(type_) {
             LLVMTypeKind::LLVMVoidTypeKind => AnyTypeEnum::VoidType(VoidType::new(type_)),
             LLVMTypeKind::LLVMHalfTypeKind |
             LLVMTypeKind::LLVMFloatTypeKind |
@@ -103,7 +99,7 @@ impl<'ctx> AnyTypeEnum<'ctx> {
             LLVMTypeKind::LLVMX86_FP80TypeKind |
             LLVMTypeKind::LLVMFP128TypeKind |
             LLVMTypeKind::LLVMPPC_FP128TypeKind => AnyTypeEnum::FloatType(FloatType::new(type_)),
-            #[cfg(feature = "llvm11-0")]
+            #[cfg(any(feature = "llvm11-0", feature = "llvm12-0"))]
             LLVMTypeKind::LLVMBFloatTypeKind => AnyTypeEnum::FloatType(FloatType::new(type_)),
             LLVMTypeKind::LLVMLabelTypeKind => panic!("FIXME: Unsupported type: Label"),
             LLVMTypeKind::LLVMIntegerTypeKind => AnyTypeEnum::IntType(IntType::new(type_)),
@@ -112,10 +108,12 @@ impl<'ctx> AnyTypeEnum<'ctx> {
             LLVMTypeKind::LLVMArrayTypeKind => AnyTypeEnum::ArrayType(ArrayType::new(type_)),
             LLVMTypeKind::LLVMPointerTypeKind => AnyTypeEnum::PointerType(PointerType::new(type_)),
             LLVMTypeKind::LLVMVectorTypeKind => AnyTypeEnum::VectorType(VectorType::new(type_)),
-            #[cfg(feature = "llvm11-0")]
+            #[cfg(any(feature = "llvm11-0", feature = "llvm12-0"))]
             LLVMTypeKind::LLVMScalableVectorTypeKind => AnyTypeEnum::VectorType(VectorType::new(type_)),
             LLVMTypeKind::LLVMMetadataTypeKind => panic!("FIXME: Unsupported type: Metadata"),
             LLVMTypeKind::LLVMX86_MMXTypeKind => panic!("FIXME: Unsupported type: MMX"),
+            #[cfg(feature = "llvm12-0")]
+            LLVMTypeKind::LLVMX86_AMXTypeKind => panic!("FIXME: Unsupported type: AMX"),
             #[cfg(not(any(feature = "llvm3-6", feature = "llvm3-7")))]
             LLVMTypeKind::LLVMTokenTypeKind => panic!("FIXME: Unsupported type: Token"),
         }
@@ -123,14 +121,16 @@ impl<'ctx> AnyTypeEnum<'ctx> {
 
     /// This will panic if type is a void or function type.
     pub(crate) fn to_basic_type_enum(&self) -> BasicTypeEnum<'ctx> {
-        BasicTypeEnum::new(self.as_type_ref())
+        unsafe {
+            BasicTypeEnum::new(self.as_type_ref())
+        }
     }
 
     pub fn into_array_type(self) -> ArrayType<'ctx> {
         if let AnyTypeEnum::ArrayType(t) = self {
             t
         } else {
-            panic!("Found {:?} but expected another variant", self);
+            panic!("Found {:?} but expected the ArrayType variant", self);
         }
     }
 
@@ -138,7 +138,7 @@ impl<'ctx> AnyTypeEnum<'ctx> {
         if let AnyTypeEnum::FloatType(t) = self {
             t
         } else {
-            panic!("Found {:?} but expected another variant", self);
+            panic!("Found {:?} but expected the FloatType variant", self);
         }
     }
 
@@ -146,7 +146,7 @@ impl<'ctx> AnyTypeEnum<'ctx> {
         if let AnyTypeEnum::FunctionType(t) = self {
             t
         } else {
-            panic!("Found {:?} but expected another variant", self);
+            panic!("Found {:?} but expected the FunctionType variant", self);
         }
     }
 
@@ -154,7 +154,7 @@ impl<'ctx> AnyTypeEnum<'ctx> {
         if let AnyTypeEnum::IntType(t) = self {
             t
         } else {
-            panic!("Found {:?} but expected another variant", self);
+            panic!("Found {:?} but expected the IntType variant", self);
         }
     }
 
@@ -162,7 +162,7 @@ impl<'ctx> AnyTypeEnum<'ctx> {
         if let AnyTypeEnum::PointerType(t) = self {
             t
         } else {
-            panic!("Found {:?} but expected another variant", self);
+            panic!("Found {:?} but expected the PointerType variant", self);
         }
     }
 
@@ -170,7 +170,7 @@ impl<'ctx> AnyTypeEnum<'ctx> {
         if let AnyTypeEnum::StructType(t) = self {
             t
         } else {
-            panic!("Found {:?} but expected another variant", self);
+            panic!("Found {:?} but expected the StructType variant", self);
         }
     }
 
@@ -178,7 +178,7 @@ impl<'ctx> AnyTypeEnum<'ctx> {
         if let AnyTypeEnum::VectorType(t) = self {
             t
         } else {
-            panic!("Found {:?} but expected another variant", self);
+            panic!("Found {:?} but expected the VectorType variant", self);
         }
     }
 
@@ -186,7 +186,7 @@ impl<'ctx> AnyTypeEnum<'ctx> {
         if let AnyTypeEnum::VoidType(t) = self {
             t
         } else {
-            panic!("Found {:?} but expected another variant", self);
+            panic!("Found {:?} but expected the VoidType variant", self);
         }
     }
 
@@ -237,29 +237,29 @@ impl<'ctx> AnyTypeEnum<'ctx> {
 }
 
 impl<'ctx> BasicTypeEnum<'ctx> {
-    pub(crate) fn new(type_: LLVMTypeRef) -> Self {
-        let type_kind = unsafe {
-            LLVMGetTypeKind(type_)
-        };
-
-        match type_kind {
+    pub(crate) unsafe fn new(type_: LLVMTypeRef) -> Self {
+        match LLVMGetTypeKind(type_) {
             LLVMTypeKind::LLVMHalfTypeKind |
             LLVMTypeKind::LLVMFloatTypeKind |
             LLVMTypeKind::LLVMDoubleTypeKind |
             LLVMTypeKind::LLVMX86_FP80TypeKind |
             LLVMTypeKind::LLVMFP128TypeKind |
             LLVMTypeKind::LLVMPPC_FP128TypeKind => BasicTypeEnum::FloatType(FloatType::new(type_)),
-            #[cfg(feature= "llvm11-0")]
+            #[cfg(any(feature = "llvm11-0", feature = "llvm12-0"))]
             LLVMTypeKind::LLVMBFloatTypeKind => BasicTypeEnum::FloatType(FloatType::new(type_)),
             LLVMTypeKind::LLVMIntegerTypeKind => BasicTypeEnum::IntType(IntType::new(type_)),
             LLVMTypeKind::LLVMStructTypeKind => BasicTypeEnum::StructType(StructType::new(type_)),
             LLVMTypeKind::LLVMPointerTypeKind => BasicTypeEnum::PointerType(PointerType::new(type_)),
             LLVMTypeKind::LLVMArrayTypeKind => BasicTypeEnum::ArrayType(ArrayType::new(type_)),
             LLVMTypeKind::LLVMVectorTypeKind => BasicTypeEnum::VectorType(VectorType::new(type_)),
-            #[cfg(feature= "llvm11-0")]
+            #[cfg(any(feature = "llvm11-0", feature = "llvm12-0"))]
             LLVMTypeKind::LLVMScalableVectorTypeKind => BasicTypeEnum::VectorType(VectorType::new(type_)),
             LLVMTypeKind::LLVMMetadataTypeKind => unreachable!("Unsupported basic type: Metadata"),
+            // see https://llvm.org/docs/LangRef.html#x86-mmx-type
             LLVMTypeKind::LLVMX86_MMXTypeKind => unreachable!("Unsupported basic type: MMX"),
+            // see https://llvm.org/docs/LangRef.html#x86-amx-type
+            #[cfg(feature = "llvm12-0")]
+            LLVMTypeKind::LLVMX86_AMXTypeKind => unreachable!("Unsupported basic type: AMX"),
             LLVMTypeKind::LLVMLabelTypeKind => unreachable!("Unsupported basic type: Label"),
             LLVMTypeKind::LLVMVoidTypeKind => unreachable!("Unsupported basic type: VoidType"),
             LLVMTypeKind::LLVMFunctionTypeKind => unreachable!("Unsupported basic type: FunctionType"),
@@ -272,7 +272,7 @@ impl<'ctx> BasicTypeEnum<'ctx> {
         if let BasicTypeEnum::ArrayType(t) = self {
             t
         } else {
-            panic!("Found {:?} but expected another variant", self);
+            panic!("Found {:?} but expected the ArrayType variant", self);
         }
     }
 
@@ -280,7 +280,7 @@ impl<'ctx> BasicTypeEnum<'ctx> {
         if let BasicTypeEnum::FloatType(t) = self {
             t
         } else {
-            panic!("Found {:?} but expected another variant", self);
+            panic!("Found {:?} but expected the FloatType variant", self);
         }
     }
 
@@ -288,7 +288,7 @@ impl<'ctx> BasicTypeEnum<'ctx> {
         if let BasicTypeEnum::IntType(t) = self {
             t
         } else {
-            panic!("Found {:?} but expected another variant", self);
+            panic!("Found {:?} but expected the IntType variant", self);
         }
     }
 
@@ -296,7 +296,7 @@ impl<'ctx> BasicTypeEnum<'ctx> {
         if let BasicTypeEnum::PointerType(t) = self {
             t
         } else {
-            panic!("Found {:?} but expected another variant", self);
+            panic!("Found {:?} but expected the PointerType variant", self);
         }
     }
 
@@ -304,7 +304,7 @@ impl<'ctx> BasicTypeEnum<'ctx> {
         if let BasicTypeEnum::StructType(t) = self {
             t
         } else {
-            panic!("Found {:?} but expected another variant", self);
+            panic!("Found {:?} but expected the StructType variant", self);
         }
     }
 
@@ -312,7 +312,7 @@ impl<'ctx> BasicTypeEnum<'ctx> {
         if let BasicTypeEnum::VectorType(t) = self {
             t
         } else {
-            panic!("Found {:?} but expected another variant", self);
+            panic!("Found {:?} but expected the VectorType variant", self);
         }
     }
 
