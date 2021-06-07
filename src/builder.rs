@@ -234,7 +234,9 @@ impl<'ctx> Builder<'ctx> {
             )
         };
 
-        CallSiteValue::new(value)
+        unsafe { 
+            CallSiteValue::new(value)
+        }
     }
 
 
@@ -267,7 +269,9 @@ impl<'ctx> Builder<'ctx> {
             LLVMAddClause(value, null.as_value_ref());
         };
 
-        BasicValueEnum::new(value)
+        unsafe {
+            BasicValueEnum::new(value)
+        }
     }
 
     pub fn build_cleanup_landing_pad(
@@ -294,13 +298,17 @@ impl<'ctx> Builder<'ctx> {
             LLVMSetCleanup(value, 1);
         };
 
-        BasicValueEnum::new(value)
+        unsafe {
+            BasicValueEnum::new(value)
+        }
     }
 
     pub fn build_resume(&self, value: &dyn BasicValue<'ctx>) -> InstructionValue<'ctx> {
         let val = unsafe { LLVMBuildResume(self.builder, value.as_value_ref()) };
 
-        InstructionValue::new(val)
+        unsafe {
+            InstructionValue::new(val)
+        }
     }
 
     // REVIEW: Doesn't GEP work on array too?
