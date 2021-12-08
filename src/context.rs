@@ -1,12 +1,16 @@
 //! A `Context` is an opaque owner and manager of core global data.
 
 use llvm_sys::core::{LLVMAppendBasicBlockInContext, LLVMContextCreate, LLVMContextDispose, LLVMCreateBuilderInContext, LLVMDoubleTypeInContext, LLVMFloatTypeInContext, LLVMFP128TypeInContext, LLVMInsertBasicBlockInContext, LLVMInt16TypeInContext, LLVMInt1TypeInContext, LLVMInt32TypeInContext, LLVMInt64TypeInContext, LLVMInt8TypeInContext, LLVMIntTypeInContext, LLVMModuleCreateWithNameInContext, LLVMStructCreateNamed, LLVMStructTypeInContext, LLVMVoidTypeInContext, LLVMHalfTypeInContext, LLVMGetGlobalContext, LLVMPPCFP128TypeInContext, LLVMConstStructInContext, LLVMMDNodeInContext, LLVMMDStringInContext, LLVMGetMDKindIDInContext, LLVMX86FP80TypeInContext, LLVMConstStringInContext, LLVMContextSetDiagnosticHandler};
+#[llvm_versions(6.0..=latest)]
+use llvm_sys::core::LLVMMetadataTypeInContext;
 #[llvm_versions(3.9..=latest)]
 use llvm_sys::core::{LLVMCreateEnumAttribute, LLVMCreateStringAttribute};
 #[llvm_versions(3.6..7.0)]
 use llvm_sys::core::{LLVMConstInlineAsm};
 #[llvm_versions(7.0..=latest)]
 use llvm_sys::core::{LLVMGetInlineAsm};
+#[llvm_versions(12.0..=latest)]
+use llvm_sys::core::{LLVMCreateTypeAttribute};
 #[llvm_versions(7.0..=latest)]
 use crate::InlineAsmDialect;
 use llvm_sys::prelude::{LLVMContextRef, LLVMTypeRef, LLVMValueRef, LLVMDiagnosticInfoRef};
@@ -25,7 +29,9 @@ use crate::memory_buffer::MemoryBuffer;
 use crate::module::Module;
 use crate::support::{to_c_str, LLVMString};
 use crate::targets::TargetData;
-use crate::types::{BasicTypeEnum, FloatType, IntType, StructType, VoidType, AsTypeRef, FunctionType};
+use crate::types::{AnyTypeEnum, BasicTypeEnum, FloatType, IntType, StructType, VoidType, AsTypeRef, FunctionType};
+#[llvm_versions(6.0..=latest)]
+use crate::types::MetadataType;
 use crate::values::{AsValueRef, BasicMetadataValueEnum, BasicValueEnum, FunctionValue, StructValue, MetadataValue, VectorValue, PointerValue};
 
 use std::marker::PhantomData;
@@ -209,12 +215,62 @@ impl Context {
     ///
     /// builder.position_at_end(basic_block);
     /// let asm_fn = context.i64_type().fn_type(&[context.i64_type().into(), context.i64_type().into()], false);
+    /// let asm = context.create_inline_asm(asm_fn, "syscall".to_string(), "=r,{rax},{rdi}".to_string(), true, false, None, false);
+    /// let params = &[context.i64_type().const_int(60, false).into(), context.i64_type().const_int(1, false).into()];
+    /// let callable_value = CallableValue::try_from(asm).unwrap();
+    /// builder.build_call(callable_value, params, "exit");
+    /// builder.build_return(None);
+    /// ```
+    #[llvm_versions(13.0..=latest)]
+    pub fn create_inline_asm(&self, ty: FunctionType, mut assembly: String, mut constraints: String, sideeffects: bool, alignstack: bool, dialect: Option<InlineAsmDialect>,
+        can_throw: bool,
+    ) -> PointerValue {
+        #[cfg(any(feature = "llvm13-0"))]
+        let can_throw_llvmbool = can_throw as i32;
+
+        let value = unsafe {
+            LLVMGetInlineAsm(
+                ty.as_type_ref(),
+                assembly.as_mut_ptr() as *mut ::libc::c_char,
+                assembly.len(),
+                constraints.as_mut_ptr() as *mut ::libc::c_char,
+                constraints.len(),
+                sideeffects as i32,
+                alignstack as i32,
+                dialect.unwrap_or(InlineAsmDialect::ATT).into(),
+                can_throw_llvmbool,
+            )
+        };
+
+        unsafe {
+            PointerValue::new(value)
+        }
+    }
+    /// Creates a inline asm function pointer.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use std::convert::TryFrom;
+    /// use inkwell::context::Context;
+    /// use inkwell::values::CallableValue;
+    ///
+    /// let context = Context::create();
+    /// let module = context.create_module("my_module");
+    /// let builder = context.create_builder();
+    /// let void_type = context.void_type();
+    /// let fn_type = void_type.fn_type(&[], false);
+    /// let fn_val = module.add_function("my_fn", fn_type, None);
+    /// let basic_block = context.append_basic_block(fn_val, "entry");
+    ///
+    /// builder.position_at_end(basic_block);
+    /// let asm_fn = context.i64_type().fn_type(&[context.i64_type().into(), context.i64_type().into()], false);
     /// let asm = context.create_inline_asm(asm_fn, "syscall".to_string(), "=r,{rax},{rdi}".to_string(), true, false, None);
     /// let params = &[context.i64_type().const_int(60, false).into(), context.i64_type().const_int(1, false).into()];
     /// let callable_value = CallableValue::try_from(asm).unwrap();
     /// builder.build_call(callable_value, params, "exit");
     /// builder.build_return(None);
-    #[llvm_versions(7.0..=latest)]
+    /// ```
+    #[llvm_versions(7.0..=12.0)]
     pub fn create_inline_asm(&self, ty: FunctionType, mut assembly: String, mut constraints: String, sideeffects: bool, alignstack: bool, dialect: Option<InlineAsmDialect>) -> PointerValue {
         let value = unsafe {
             LLVMGetInlineAsm(
@@ -225,7 +281,7 @@ impl Context {
                 constraints.len(),
                 sideeffects as i32,
                 alignstack as i32,
-                dialect.unwrap_or(InlineAsmDialect::ATT).into()
+                dialect.unwrap_or(InlineAsmDialect::ATT).into(),
             )
         };
 
@@ -256,6 +312,7 @@ impl Context {
     /// let callable_value = CallableValue::try_from(asm).unwrap();
     /// builder.build_call(callable_value, params, "exit");
     /// builder.build_return(None);
+    /// ```
     #[llvm_versions(3.6..7.0)]
     pub fn create_inline_asm(&self, ty: FunctionType, assembly: String, constraints: String, sideeffects: bool, alignstack: bool) -> PointerValue {
         let value = unsafe {
@@ -422,6 +479,26 @@ impl Context {
     pub fn custom_width_int_type(&self, bits: u32) -> IntType {
         unsafe {
             IntType::new(LLVMIntTypeInContext(self.context, bits))
+        }
+    }
+
+    /// Gets the `MetadataType` representing 128 bit width. It will be assigned the current context.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use inkwell::context::Context;
+    /// use inkwell::values::IntValue;
+    ///
+    /// let context = Context::create();
+    /// let md_type = context.metadata_type();
+    ///
+    /// assert_eq!(*md_type.get_context(), context);
+    /// ```
+    #[llvm_versions(6.0..=latest)]
+    pub fn metadata_type(&self) -> MetadataType {
+        unsafe {
+            MetadataType::new(LLVMMetadataTypeInContext(self.context))
         }
     }
 
@@ -901,6 +978,37 @@ impl Context {
                 key.len() as u32,
                 val.as_ptr() as *const _,
                 val.len() as u32,
+            ))
+        }
+    }
+
+    /// Create an enum `Attribute` with an `AnyTypeEnum` attached to it.
+    ///
+    /// # Example
+    /// ```rust
+    /// use inkwell::context::Context;
+    /// use inkwell::attributes::Attribute;
+    /// use inkwell::types::AnyType;
+    ///
+    /// let context = Context::create();
+    /// let kind_id = Attribute::get_named_enum_kind_id("sret");
+    /// let any_type = context.i32_type().as_any_type_enum();
+    /// let type_attribute = context.create_type_attribute(
+    ///     kind_id,
+    ///     any_type,
+    /// );
+    ///
+    /// assert!(type_attribute.is_type());
+    /// assert_eq!(type_attribute.get_type_value(), any_type);
+    /// assert_ne!(type_attribute.get_type_value(), context.i64_type().as_any_type_enum());
+    /// ```
+    #[llvm_versions(12.0..=latest)]
+    pub fn create_type_attribute(&self, kind_id: u32, type_ref: AnyTypeEnum) -> Attribute {
+        unsafe {
+            Attribute::new(LLVMCreateTypeAttribute(
+                self.context,
+                kind_id,
+                type_ref.as_type_ref(),
             ))
         }
     }
