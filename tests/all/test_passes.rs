@@ -12,13 +12,17 @@ fn test_init_all_passes_for_module() {
 
     pass_manager.add_argument_promotion_pass();
     pass_manager.add_constant_merge_pass();
+    #[cfg(not(any(feature = "llvm3-6", feature = "llvm3-7", feature = "llvm3-8", feature = "llvm3-9",
+                  feature = "llvm4-0", feature = "llvm5-0", feature = "llvm6-0", feature = "llvm7-0",
+                  feature = "llvm8-0", feature = "llvm9-0")))]
+    pass_manager.add_merge_functions_pass();
     pass_manager.add_dead_arg_elimination_pass();
     pass_manager.add_function_attrs_pass();
     pass_manager.add_function_inlining_pass();
     pass_manager.add_always_inliner_pass();
     pass_manager.add_global_dce_pass();
     pass_manager.add_global_optimizer_pass();
-    #[cfg(not(feature = "llvm12-0"))]
+    #[cfg(not(any(feature = "llvm12-0", feature = "llvm13-0")))]
     pass_manager.add_ip_constant_propagation_pass();
     pass_manager.add_prune_eh_pass();
     pass_manager.add_ipsccp_pass();
@@ -59,9 +63,9 @@ fn test_init_all_passes_for_module() {
     pass_manager.add_scalar_repl_aggregates_pass_with_threshold(1);
     pass_manager.add_simplify_lib_calls_pass();
     pass_manager.add_tail_call_elimination_pass();
-    #[cfg(not(feature = "llvm12-0"))]
+    #[cfg(not(any(feature = "llvm12-0", feature = "llvm13-0")))]
     pass_manager.add_constant_propagation_pass();
-    #[cfg(feature = "llvm12-0")]
+    #[cfg(any(feature = "llvm12-0", feature = "llvm13-0"))]
     pass_manager.add_instruction_simplify_pass();
     pass_manager.add_demote_memory_to_register_pass();
     pass_manager.add_verifier_pass();
@@ -143,9 +147,9 @@ fn test_pass_manager_builder() {
     let module2 = module.clone();
 
     // TODOC: In 3.6, 3.8, & 3.9 it returns false. Seems like a LLVM bug?
-    #[cfg(not(any(feature = "llvm3-7", feature = "llvm6-0", feature = "llvm7-0", feature = "llvm8-0", feature = "llvm9-0", feature = "llvm10-0", feature = "llvm11-0", feature = "llvm12-0")))]
+    #[cfg(not(any(feature = "llvm3-7", feature = "llvm6-0", feature = "llvm7-0", feature = "llvm8-0", feature = "llvm9-0", feature = "llvm10-0", feature = "llvm11-0", feature = "llvm12-0", feature = "llvm13-0")))]
     assert!(!module_pass_manager.run_on(&module));
-    #[cfg(any(feature = "llvm3-7", feature = "llvm6-0", feature = "llvm7-0", feature = "llvm8-0", feature = "llvm9-0", feature = "llvm10-0", feature = "llvm11-0", feature = "llvm12-0"))]
+    #[cfg(any(feature = "llvm3-7", feature = "llvm6-0", feature = "llvm7-0", feature = "llvm8-0", feature = "llvm9-0", feature = "llvm10-0", feature = "llvm11-0", feature = "llvm12-0", feature = "llvm13-0"))]
     assert!(module_pass_manager.run_on(&module));
 
     let lto_pass_manager = PassManager::create(());

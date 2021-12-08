@@ -1,7 +1,6 @@
 use llvm_sys::core::{LLVMConstInt, LLVMConstAllOnes, LLVMGetIntTypeWidth, LLVMConstIntOfStringAndSize, LLVMConstIntOfArbitraryPrecision, LLVMConstArray};
 use llvm_sys::execution_engine::LLVMCreateGenericValueOfInt;
 use llvm_sys::prelude::{LLVMTypeRef, LLVMValueRef};
-use regex::Regex;
 
 use crate::AddressSpace;
 use crate::context::ContextRef;
@@ -10,6 +9,7 @@ use crate::types::{Type, ArrayType, BasicTypeEnum, VectorType, PointerType, Func
 use crate::values::{AsValueRef, ArrayValue, GenericValue, IntValue};
 
 use std::convert::TryFrom;
+use crate::types::enums::BasicMetadataTypeEnum;
 
 /// How to interpret a string or digits used to construct an integer constant.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -42,14 +42,24 @@ impl TryFrom<u8> for StringRadix {
 }
 
 impl StringRadix {
-    /// Create a Regex that matches valid strings for the given radix.
-    pub fn to_regex(&self) -> Regex {
+    /// Is the string valid for the given radix?
+    pub fn matches_str(&self, slice: &str) -> bool {
+        // drop 1 optional + or -
+        let slice = slice.strip_prefix(|c| c == '+' || c == '-').unwrap_or(slice);
+
+        // there must be at least 1 actual digit
+        if slice.is_empty() {
+            return false;
+        }
+
+        // and all digits must be in the radix' character set
+        let mut it = slice.chars();
         match self {
-            StringRadix::Binary => Regex::new(r"^[-+]?[01]+$").unwrap(),
-            StringRadix::Octal => Regex::new(r"^[-+]?[0-7]+$").unwrap(),
-            StringRadix::Decimal => Regex::new(r"^[-+]?[0-9]+$").unwrap(),
-            StringRadix::Hexadecimal => Regex::new(r"^[-+]?[0-9abcdefABCDEF]+$").unwrap(),
-            StringRadix::Alphanumeric => Regex::new(r"^[-+]?[0-9[:alpha:]]+$").unwrap(),
+            StringRadix::Binary => it.all(|c| matches!(c, '0'..='1')),
+            StringRadix::Octal => it.all(|c| matches!(c, '0'..='7')),
+            StringRadix::Decimal => it.all(|c| matches!(c, '0'..='9')),
+            StringRadix::Hexadecimal => it.all(|c| matches!(c, '0'..='9' | 'a'..='f' | 'A'..='F')),
+            StringRadix::Alphanumeric => it.all(|c| matches!(c, '0'..='9' | 'a'..='z' | 'A'..='Z')),
         }
     }
 }
@@ -116,7 +126,7 @@ impl<'ctx> IntType<'ctx> {
     /// assert!(i8_val.is_none());
     /// ```
     pub fn const_int_from_string(self, slice: &str, radix: StringRadix) -> Option<IntValue<'ctx>> {
-        if !radix.to_regex().is_match(slice) {
+        if !radix.matches_str(slice) {
             return None
         }
 
@@ -195,7 +205,7 @@ impl<'ctx> IntType<'ctx> {
     /// let i8_type = context.i8_type();
     /// let fn_type = i8_type.fn_type(&[], false);
     /// ```
-    pub fn fn_type(self, param_types: &[BasicTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
+    pub fn fn_type(self, param_types: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
         self.int_type.fn_type(param_types, is_var_args)
     }
 
