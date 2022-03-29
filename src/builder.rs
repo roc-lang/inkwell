@@ -852,6 +852,41 @@ impl<'ctx> Builder<'ctx> {
         }
     }
 
+    /// Build a [memset](http://llvm.org/docs/LangRef.html#llvm-memset-intrinsics) instruction.
+    ///
+    /// Alignment arguments are specified in bytes, and should always be
+    /// both a power of 2 and under 2^64.
+    ///
+    /// The final argument should be a pointer-sized integer.
+    ///
+    /// [`TargetData::ptr_sized_int_type_in_context`](https://thedan64.github.io/inkwell/inkwell/targets/struct.TargetData.html#method.ptr_sized_int_type_in_context) will get you one of those.
+    #[llvm_versions(8.0..=latest)]
+    pub fn build_memset(
+        &self,
+        dest: PointerValue<'ctx>,
+        dest_align_bytes: u32,
+        val : IntValue<'ctx>,
+        size: IntValue<'ctx>,
+    ) -> Result<PointerValue<'ctx>, &'static str> {
+        if !is_alignment_ok(dest_align_bytes) {
+            return Err("The src_align_bytes argument to build_memmove was not a power of 2 under 2^64.");
+        }
+
+        let value = unsafe {
+            LLVMBuildMemSet(
+                self.builder,
+                dest.as_value_ref(),
+                val.as_value_ref(),
+                size.as_value_ref(),
+                dest_align_bytes,
+            )
+        };
+
+        unsafe {
+            Ok(PointerValue::new(value))
+        }
+    }
+
     // TODOC: Heap allocation
     pub fn build_malloc<T: BasicType<'ctx>>(&self, ty: T, name: &str) -> Result<PointerValue<'ctx>, &'static str> {
         // LLVMBulidMalloc segfaults if ty is unsized
