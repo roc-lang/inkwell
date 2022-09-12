@@ -1,3 +1,12 @@
+# This fork is for [the Roc compiler](https://github.com/roc-lang/roc/tree/main/crates/compiler)
+
+We need to pin a specific Inkwell version for Roc,
+so we use & maintain this fork.
+In the past, we've made some Roc-specific modifications,
+but there shouldn't currently be any major deviations from upstream.
+
+---
+
 # Inkwell(s)
 
 [![Crates.io](https://img.shields.io/crates/v/inkwell.svg?style=plastic)](https://crates.io/crates/inkwell)
